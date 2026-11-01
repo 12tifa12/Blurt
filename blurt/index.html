@@ -1,0 +1,1173 @@
+<title>Blurt</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Instrument+Sans:wght@400;500;600&display=swap">
+<style>
+/* One-screen app: header, living orb + live transcript in the middle, a wallet stack of category cards at the bottom. Dark only. */
+:root {
+  color-scheme: dark;
+  --bg: #0E0C15;
+  --surface: #1A1724;
+  --line: #2C283A;
+  --fg: #F3F0FB;
+  --muted: #9C97B3;
+  --ink: #15121D;
+  --ink-soft: #3B3548;
+  --danger: #FF9B9B;
+  --over-bg: #7A1F2B;
+  --over-fg: #FFD6DA;
+  --cal: #9D8CFF;
+  --task: #FF7F5C;
+  --shop: #45DDA8;
+  --note: #F6C64E;
+  --rem: #6CCBFF;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body: "Instrument Sans", system-ui, -apple-system, sans-serif;
+  --peek: 50px;
+  --card-h: 132px;
+}
+@media (max-height: 700px) { :root { --peek: 42px; --card-h: 112px; } }
+
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--body); font-size: 15px; overflow: hidden; -webkit-tap-highlight-color: transparent; }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
+:focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; border-radius: 8px; }
+
+#app { position: relative; height: 100%; max-width: 460px; margin: 0 auto; display: flex; flex-direction: column; box-sizing: border-box; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 14px 16px; overflow: hidden; }
+
+header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.brand { font-family: var(--display); font-weight: 800; font-size: 24px; letter-spacing: -0.03em; }
+.date { color: var(--muted); font-size: 13px; margin-left: 10px; }
+.ghost { color: var(--muted); font-size: 13px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; }
+.ghost:hover { color: var(--fg); border-color: var(--muted); }
+.ghost, .sort, .back, .tick, .link, .x, .hero-actions button, .strip .wd { transition: scale 0.3s cubic-bezier(.3, 1.6, .5, 1), background 0.15s; }
+.ghost:active, .sort:active, .back:active, .tick:active, .link:active, .x:active, .hero-actions button:active, .strip .wd:active { scale: 0.9; transition-duration: 0.06s; }
+.card:active { translate: 0 3px; filter: brightness(0.94); transition-duration: 0.06s; }
+
+.stage { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; }
+.orb-btn { position: relative; border-radius: 50%; flex: none; transition: scale 0.45s cubic-bezier(.3, 1.8, .5, 1); }
+.orb-btn:active { scale: 0.9; transition-duration: 0.08s; }
+#orb { display: block; width: 100%; height: 100%; }
+.orb-label { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--display); font-weight: 700; font-size: 15px; color: var(--ink); pointer-events: none; }
+.transcript { margin: 0; width: 100%; min-height: 2.6em; font-family: var(--display); font-weight: 700; font-size: 23px; line-height: 1.22; letter-spacing: -0.015em; text-align: center; text-wrap: balance; transition: opacity 0.3s; }
+.transcript.fade { opacity: 0; }
+.w { display: inline-block; margin: 0 0.12em; color: var(--fg); transition: color 0.45s; animation: w-in 0.22s ease-out both; }
+.w.settled { animation: none; }
+.w.lit[data-cat="cal"] { color: var(--cal); }
+.w.lit[data-cat="task"] { color: var(--task); }
+.w.lit[data-cat="shop"] { color: var(--shop); }
+.w.lit[data-cat="note"] { color: var(--note); }
+.w.lit[data-cat="rem"] { color: var(--rem); }
+@keyframes w-in { from { opacity: 0; transform: translateY(6px); } }
+.hint { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; text-align: center; max-width: 34ch; }
+.link { color: var(--fg); text-decoration: underline; text-underline-offset: 3px; }
+#typeForm { width: 100%; display: flex; flex-direction: column; gap: 6px; }
+.type-row { display: flex; gap: 8px; }
+#typeInput { flex: 1; min-width: 0; background: var(--surface); border: 1px solid var(--line); color: var(--fg); border-radius: 14px; padding: 12px 14px; font: inherit; }
+#typeInput:focus { outline: none; border-color: var(--cal); }
+.sort { background: var(--fg); color: var(--ink); border-radius: 14px; padding: 0 18px; font-weight: 600; }
+.err { margin: 0; color: var(--danger); font-size: 13px; }
+
+/* Wallet stack */
+.stack { position: relative; flex: none; margin-top: 10px; }
+.card { position: absolute; left: 0; right: 0; height: var(--card-h); box-sizing: border-box; border-radius: 26px; padding: 14px 20px; color: var(--ink); text-align: left; display: flex; flex-direction: column; gap: 6px; transform-origin: 50% 0; box-shadow: 0 -10px 24px rgba(0, 0, 0, 0.35); transition: translate 0.25s; }
+.card:hover { translate: 0 -5px; }
+.card .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 30px; }
+.card .name { font-family: var(--display); font-weight: 800; font-size: 21px; letter-spacing: -0.02em; }
+.card .count { font-family: var(--display); font-weight: 700; font-size: 26px; font-variant-numeric: tabular-nums; }
+.card .count.month { font-size: 15px; color: var(--ink-soft); }
+.card .prev { display: flex; flex-direction: column; gap: 6px; min-width: 0; font-size: 14px; color: var(--ink-soft); }
+.card:not(:last-child) .prev { visibility: hidden; }
+.card .prev span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chip { display: inline-block; font-family: var(--body); font-size: 13px; font-weight: 600; background: var(--ink); color: var(--rem); padding: 4px 10px; border-radius: 999px; font-variant-numeric: tabular-nums; }
+.chip.over { background: var(--over-bg); color: var(--over-fg); animation: throb 1.6s ease-in-out infinite; }
+@keyframes throb { 50% { scale: 1.08; } }
+.c-cal { background: var(--cal); }
+.c-task { background: var(--task); }
+.c-shop { background: var(--shop); }
+.c-note { background: var(--note); }
+.c-rem { background: var(--rem); }
+@media (max-height: 700px) { .nextline { display: none; } }
+
+/* Day cells: shared by the calendar card face and the calendar sheet */
+.week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.wd { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 3px 0 5px; border-radius: 10px; font-size: 14px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.wd b { font-size: 10px; font-weight: 500; color: var(--ink-soft); }
+.wd i { width: 5px; height: 5px; border-radius: 50%; background: var(--ink); }
+.wd i.none { visibility: hidden; }
+.wd.on { background: var(--ink); color: var(--cal); }
+.wd.on b { color: var(--cal); }
+.wd.on i { background: var(--cal); }
+
+.fly { position: absolute; left: 0; top: 0; z-index: 15; padding: 8px 14px; border-radius: 999px; color: var(--ink); font-weight: 600; font-size: 14px; white-space: nowrap; max-width: 75%; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+
+/* Expanded sheet */
+.sheet { position: absolute; inset: 0; z-index: 20; display: flex; flex-direction: column; box-sizing: border-box; background: var(--catc); color: var(--ink); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 14px 20px; }
+.sheet .fade { opacity: 0; translate: 0 12px; transition: opacity 0.35s 0.15s, translate 0.35s 0.15s; }
+.sheet.open .fade { opacity: 1; translate: 0 0; }
+.sheet-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.back { width: 44px; height: 44px; border-radius: 50%; background: rgba(21, 18, 29, 0.14); display: grid; place-items: center; }
+.back:hover { background: rgba(21, 18, 29, 0.24); }
+.swipe-hint { font-size: 12px; color: var(--ink-soft); text-align: right; }
+.sheet h2 { font-family: var(--display); font-weight: 800; font-size: clamp(46px, 15vw, 66px); letter-spacing: -0.04em; line-height: 0.92; margin: 22px 0 6px; }
+.sheet .sub { color: var(--ink-soft); font-size: 14px; margin: 0 0 16px; font-variant-numeric: tabular-nums; }
+.sheet-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; }
+.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.row { position: relative; flex: none; border-radius: 18px; overflow: hidden; }
+.row-bg { position: absolute; inset: 0; background: var(--ink); display: flex; justify-content: space-between; align-items: center; padding: 0 20px; font-weight: 600; font-size: 14px; }
+.row-bg .l { color: var(--catc); opacity: 0; transition: opacity 0.15s, scale 0.15s; }
+.row-bg .r { color: var(--danger); opacity: 0; transition: opacity 0.15s, scale 0.15s; }
+.row-bg .r.soft { color: var(--catc); }
+.row[data-dir="done"] .l, .row[data-dir="remove"] .r { opacity: 1; }
+.row.armed .l, .row.armed .r { scale: 1.15; }
+.row-fg { position: relative; display: flex; align-items: center; gap: 12px; padding: 14px 16px; background: color-mix(in srgb, var(--catc) 58%, #ffffff); touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+.tick { width: 26px; height: 26px; flex: none; border-radius: 50%; border: 2px solid var(--ink); }
+.tick:hover { background: rgba(21, 18, 29, 0.14); }
+.txt { flex: 1; min-width: 0; font-size: 16px; font-weight: 500; overflow-wrap: anywhere; }
+.when { flex: none; font-size: 12px; font-weight: 600; background: var(--ink); color: var(--catc); padding: 4px 10px; border-radius: 999px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.when.over { background: var(--over-bg); color: var(--over-fg); }
+.empty { margin: 8px 0 0; font-size: 16px; line-height: 1.5; color: var(--ink-soft); max-width: 30ch; }
+.group { margin: 18px 0 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-soft); }
+
+/* Calendar sheet: scrollable day strip + day timeline */
+.strip { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x mandatory; flex: none; padding-bottom: 2px; }
+.strip::-webkit-scrollbar { display: none; }
+.strip .wd { position: relative; z-index: 1; flex: 0 0 calc((100% - 36px) / 7); scroll-snap-align: start; padding: 6px 0 7px; font-size: 16px; transition: color 0.25s, scale 0.3s cubic-bezier(.3, 1.6, .5, 1), background 0.15s; }
+.strip .wd b, .strip .wd i { transition: color 0.25s, background 0.25s; }
+.strip .wd.on { background: transparent; }
+.strip .wd:not(.on):hover { background: rgba(21, 18, 29, 0.1); }
+/* The selected-day highlight is one pill that glides between days */
+.strip { position: relative; }
+.pill { position: absolute; top: 0; left: 0; border-radius: 10px; background: var(--ink); transition: transform 0.34s cubic-bezier(.3, 1.25, .5, 1); }
+.allday { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+.timeline { position: relative; flex: none; margin-top: 14px; }
+.hour { height: 52px; box-sizing: border-box; border-top: 1px solid rgba(21, 18, 29, 0.16); }
+.hour span { display: block; width: 48px; padding-top: 3px; font-size: 11px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.ev { position: relative; box-sizing: border-box; min-height: 46px; border-radius: 12px; background: var(--ink); color: var(--catc); padding: 7px 44px 7px 12px; display: flex; flex-direction: column; justify-content: center; overflow: hidden; }
+.timeline .ev { position: absolute; left: 54px; right: 0; height: 48px; }
+.ev b { font-size: 15px; font-weight: 600; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ev small { font-size: 12px; }
+.ev.past { opacity: 0.55; }
+.x { position: absolute; right: 6px; top: 50%; translate: 0 -50%; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; color: var(--muted); }
+.x:hover { background: rgba(255, 255, 255, 0.08); color: var(--fg); }
+.nowline { position: absolute; left: 48px; right: 0; height: 2px; background: var(--ink); pointer-events: none; }
+.nowline::before { content: ""; position: absolute; left: -4px; top: -3px; width: 8px; height: 8px; border-radius: 50%; background: var(--ink); }
+
+/* Reminders sheet: next-up hero with a live countdown */
+.hero { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 16px 18px 18px; border-radius: 22px; background: var(--ink); color: var(--catc); }
+.hero .lbl { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+.hero .big { font-family: var(--display); font-weight: 800; font-size: clamp(44px, 14vw, 60px); letter-spacing: -0.03em; line-height: 1; font-variant-numeric: tabular-nums; }
+.hero .what { font-size: 17px; font-weight: 600; color: var(--fg); overflow-wrap: anywhere; }
+.hero.over .lbl, .hero.over .big { color: var(--danger); }
+.bar { height: 6px; border-radius: 3px; background: rgba(108, 203, 255, 0.2); margin-top: 4px; overflow: hidden; }
+.bar i { display: block; height: 100%; border-radius: 3px; background: var(--catc); transition: width 1s linear; }
+.hero-actions { display: flex; gap: 8px; margin-top: 8px; }
+.hero-actions button { flex: 1; padding: 11px; border-radius: 12px; font-weight: 600; font-size: 14px; }
+.hero-actions .primary { background: var(--catc); color: var(--ink); }
+.hero-actions .secondary { border: 1px solid rgba(108, 203, 255, 0.4); }
+
+.takeover { position: absolute; inset: 0; z-index: 30; box-sizing: border-box; background: var(--ink); color: var(--catc); display: flex; flex-direction: column; justify-content: center; gap: 18px; padding-left: max(24px, env(safe-area-inset-left, 0px)); padding-right: max(24px, env(safe-area-inset-right, 0px)); cursor: pointer; transition: opacity 0.3s; }
+.takeover svg { width: 112px; height: 112px; }
+.takeover path { fill: none; stroke: var(--catc); stroke-width: 11; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 130; stroke-dashoffset: 130; animation: draw 0.55s 0.35s cubic-bezier(.6, 0, .3, 1) forwards; }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+.takeover h3 { font-family: var(--display); font-weight: 800; font-size: clamp(50px, 16vw, 76px); letter-spacing: -0.04em; line-height: 0.9; margin: 0; }
+.takeover p { margin: 0; color: var(--muted); font-size: 15px; }
+
+.toast { position: absolute; top: 58px; left: 50%; z-index: 40; translate: -50% -16px; opacity: 0; background: var(--surface); border: 1px solid var(--line); padding: 8px 16px; border-radius: 999px; font-size: 13px; white-space: nowrap; pointer-events: none; transition: opacity 0.3s, translate 0.3s; }
+.toast.show { opacity: 1; translate: -50% 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-delay: 0ms !important; transition-duration: 0.01ms !important; }
+}
+</style>
+
+<div id="app">
+  <header>
+    <div><span class="brand">Blurt</span><span class="date" id="date"></span></div>
+    <button class="ghost" id="reset" type="button">Reset demo</button>
+  </header>
+
+  <main class="stage" id="stage">
+    <button class="orb-btn" id="orbBtn" type="button" aria-label="Start talking">
+      <canvas id="orb"></canvas>
+      <span class="orb-label" id="orbLabel">Tap to talk</span>
+    </button>
+    <p class="transcript" id="transcript" aria-live="polite"></p>
+    <p class="hint" id="hint"><span id="hintText"></span> <button class="link" id="typeBtn" type="button">Type instead</button></p>
+    <form id="typeForm" hidden>
+      <div class="type-row">
+        <input id="typeInput" type="text" autocomplete="off" placeholder="Gym tomorrow at 7, buy bananas and oats">
+        <button class="sort" type="submit">Sort</button>
+      </div>
+      <p class="err" id="err" hidden>Type something to sort first.</p>
+    </form>
+  </main>
+
+  <section class="stack" id="stack" aria-label="Your lists"></section>
+
+  <div class="sheet" id="sheet" hidden>
+    <div class="sheet-top fade">
+      <button class="back" id="back" type="button" aria-label="Back to all lists">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+      </button>
+      <span class="swipe-hint" id="swipeHint"></span>
+    </div>
+    <h2 class="fade" id="sheetTitle"></h2>
+    <p class="sub fade" id="sheetSub"></p>
+    <div class="sheet-body fade" id="sheetBody"></div>
+  </div>
+
+  <div class="takeover" id="takeover" hidden></div>
+  <div class="toast" id="toast" role="status"></div>
+</div>
+
+<script>
+// ---------- Time helpers ----------
+// Calendar and reminder items store `at` as a real timestamp (ms). Labels are worked out when drawn.
+const MIN = 6e4, HOUR = 36e5, DAY = 864e5;
+const startOfDay = t => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
+const sameDay = (a, b) => startOfDay(a) === startOfDay(b);
+const addDays = (t, n) => { const d = new Date(t); d.setDate(d.getDate() + n); return d.getTime(); };
+const atDay = (days, h, m = 0) => { const d = new Date(); d.setDate(d.getDate() + days); d.setHours(h, m, 0, 0); return d.getTime(); };
+
+function dayLabel(t, long) {
+  const diff = Math.round((startOfDay(t) - startOfDay(Date.now())) / DAY);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Tomorrow';
+  if (diff > 1 && diff < 7) return new Date(t).toLocaleDateString('en-US', { weekday: long ? 'long' : 'short' });
+  return new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+function timeLabel(t) {
+  const d = new Date(t);
+  const h = d.getHours() % 12 || 12, m = d.getMinutes();
+  return `${h}${m ? ':' + String(m).padStart(2, '0') : ''} ${d.getHours() < 12 ? 'AM' : 'PM'}`;
+}
+const whenLabel = it => it.allDay ? dayLabel(it.at) : `${dayLabel(it.at)} ${timeLabel(it.at)}`;
+function relLabel(at) {
+  const m = Math.round((at - Date.now()) / MIN);
+  if (m <= 0) return 'now';
+  if (m < 60) return `in ${m} min`;
+  const h = Math.floor(m / 60), r = m % 60;
+  return r ? `in ${h} h ${r} min` : `in ${h} h`;
+}
+function countdown(at) {
+  let s = Math.max(0, Math.round((at - Date.now()) / 1000));
+  const h = Math.floor(s / 3600); s %= 3600;
+  const m = Math.floor(s / 60); s %= 60;
+  const p = n => String(n).padStart(2, '0');
+  return h ? `${h}:${p(m)}:${p(s)}` : `${p(m)}:${p(s)}`;
+}
+const remWhen = it => it.at == null ? '' : it.at <= Date.now() ? 'Overdue' : it.at - Date.now() < 3 * HOUR ? relLabel(it.at) : whenLabel(it);
+function label(it, cat) {
+  if (cat === 'rem') return it.at == null ? it.text : `${it.text} · ${remWhen(it)}`;
+  if (cat === 'cal') return `${it.text} · ${whenLabel(it)}`;
+  return it.text;
+}
+
+// ---------- Categories, sample data, storage ----------
+const CATS = {
+  cal:  { name: 'Calendar', empty: 'No plans yet. Try "dentist Thursday at 4".' },
+  task: { name: 'To-dos',   empty: 'Nothing to do. Try "finish the report".' },
+  shop: { name: 'Shopping', empty: 'Cart is empty. Try "buy eggs and milk".' },
+  note: { name: 'Notes',    empty: 'No notes. Try "idea: a widget for my top 3".' },
+  rem:  { name: 'Reminders', empty: 'No reminders. Try "remind me to take my meds at 9".' },
+};
+const STACK_ORDER = ['note', 'shop', 'task', 'rem', 'cal']; // back to front
+
+function seed() {
+  const now = Date.now();
+  return {
+    cal:  [{ text: 'Team standup', at: atDay(1, 10) }, { text: 'Lunch with Sara', at: atDay(3, 12, 30) }, { text: 'Haircut', at: atDay(5, 13) }],
+    task: [{ text: 'Renew student ID' }, { text: 'Push portfolio updates' }],
+    shop: [{ text: 'Oat milk' }, { text: 'Rice' }],
+    note: [{ text: 'Push day: bench, overhead press, dips' }],
+    rem:  [{ text: 'Pay rent', at: now + 45 * MIN, created: now - 15 * MIN }, { text: 'Take vitamins', at: atDay(1, 9), created: now }, { text: 'Stretch', at: null }],
+  };
+}
+const SAMPLES = [
+  'Dentist Thursday at 4, buy eggs and milk, finish the ACL report',
+  'Call mom tonight, remind me to pay the internet bill at 9, pick up batteries and coffee',
+  'Gym tomorrow at 7am, idea: a widget that only shows my top three, in 20 minutes take the laundry out',
+];
+
+const KEY = 'blurt.v2';
+const uid = () => Math.random().toString(36).slice(2, 9);
+function fresh() {
+  const s = { items: {}, done: {} }, data = seed();
+  for (const k in CATS) {
+    s.items[k] = (data[k] || []).map(o => ({ ...o, id: uid() }));
+    s.done[k] = 0;
+  }
+  return s;
+}
+function load() {
+  try { const s = JSON.parse(localStorage.getItem(KEY)); return s && s.items ? s : null; } catch { return null; }
+}
+function save() {
+  try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {}
+}
+let state = load() || fresh();
+// Saved data from an older version may be missing newer cards
+for (const k in CATS) {
+  state.items[k] = state.items[k] || [];
+  state.done[k] = state.done[k] || 0;
+}
+
+const nextRem = () => state.items.rem.filter(i => i.at != null).sort((a, b) => a.at - b.at)[0];
+const nextCal = () => state.items.cal
+  .filter(e => e.allDay ? startOfDay(e.at) >= startOfDay(Date.now()) : e.at >= Date.now())
+  .sort((a, b) => a.at - b.at)[0];
+const hasEvent = t => state.items.cal.some(e => sameDay(e.at, t));
+
+// ---------- Demo sorter (stands in for the AI call later) ----------
+const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+const DAY_RE = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tonight|tomorrow)\b/i;
+const TIME_RE = /\bat\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b|\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i;
+// Calendar dates: "november 6th", "nov 6", "6 november", "the 6th of nov", optionally with a year
+const MONTH = '(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
+const ORD = '(\\d{1,2})(?:st|nd|rd|th)?';
+const DATE_RE = new RegExp(`\\b(?:on\\s+)?(?:the\\s+)?(?:${MONTH}\\.?\\s+(?:the\\s+)?${ORD}|${ORD}\\s+(?:of\\s+)?${MONTH}\\.?)(?:\\s+(\\d{4}))?\\b`, 'i');
+const ORD_RE = /\bon\s+the\s+(\d{1,2})(?:st|nd|rd|th)\b/i; // "on the 6th" = this month, or next if it has passed
+const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+const SHOP_RE = /^(?:i\s+)?(?:need\s+to\s+)?(?:buy|get|grab|pick\s+up|order)\s+/i;
+const NOTE_RE = /^(?:idea|note|thought|remember\s+that)\s*[:,-]?\s+/i;
+const REM_RE = /^(?:please\s+)?remind\s+me\s+(?:to\s+|about\s+|that\s+)?/i;
+const IN_RE = /\bin\s+(\d+|an?|half\s+an)\s*(minutes?|mins?|hours?|hrs?)\b/i;
+const FILLER_RE = /^(?:(?:and|also|then)\s+)*(?:i\s+(?:need|have|want)\s+to\s+|need\s+to\s+|have\s+to\s+|remember\s+to\s+|don'?t\s+forget\s+to\s+)?/i;
+const VERBS = 'call|finish|email|text|send|pay|book|clean|study|write|fix|buy|get|grab|pick up|meet|submit|read|review|plan|cook|order|remember|go';
+const AND_SPLIT = new RegExp(`\\s+and\\s+(?=(?:${VERBS})\\b)`, 'i');
+const cap = s => s ? s[0].toUpperCase() + s.slice(1) : s;
+
+// Turns "Thursday at 4" / "november 6th 9am" / "tomorrow" / "at 9" into a real timestamp
+function findWhen(c) {
+  // Pull out the date first, so its number ("6th") can't be mistaken for a time
+  let rest = c;
+  const dm = rest.match(DATE_RE) || rest.match(ORD_RE);
+  if (dm) rest = rest.replace(dm[0], ' ');
+  const d = rest.match(DAY_RE);
+  if (d) rest = rest.replace(d[0], ' ');
+  const t = rest.match(TIME_RE);
+  if (t) rest = rest.replace(t[0], ' ');
+  if (!dm && !d && !t) return null;
+  rest = rest.replace(/\b(?:on|at|this|next)\s*$/i, '').replace(/^\s*(?:on|at)\b/i, '').replace(/\s+/g, ' ').trim();
+
+  const now = new Date(), date = new Date(now);
+  date.setSeconds(0, 0);
+  let hasTime = false;
+  if (t) {
+    let h = +(t[1] || t[4]);
+    const m = +(t[2] || t[5] || 0);
+    let ap = (t[3] || t[6] || '').toLowerCase();
+    if (!ap && h <= 12) ap = (d && /tonight/i.test(d[1])) || !(h >= 8 && h <= 11) ? 'pm' : 'am';
+    if (h <= 12) {
+      if (ap === 'pm' && h < 12) h += 12;
+      if (ap === 'am' && h === 12) h = 0;
+    }
+    date.setHours(h, m);
+    hasTime = true;
+  }
+  if (dm) {
+    const today = startOfDay(now);
+    if (dm.length === 2) {
+      // "on the 6th"
+      date.setDate(+dm[1]);
+      if (startOfDay(date) < today) date.setMonth(date.getMonth() + 1, +dm[1]);
+    } else {
+      const month = MONTHS.indexOf((dm[1] || dm[4]).slice(0, 3).toLowerCase());
+      const dayNum = +(dm[2] || dm[3]);
+      date.setFullYear(dm[5] ? +dm[5] : now.getFullYear(), month, dayNum);
+      if (!dm[5] && startOfDay(date) < today) date.setFullYear(now.getFullYear() + 1, month, dayNum); // "jan 3" in November means next year
+    }
+  } else if (d) {
+    const w = d[1].toLowerCase();
+    const add = w === 'tomorrow' ? 1 : w === 'today' || w === 'tonight' ? 0 : (WEEKDAYS.indexOf(w) - now.getDay() + 7) % 7;
+    date.setDate(now.getDate() + add);
+    if (!hasTime && w === 'tonight') { date.setHours(20, 0); hasTime = true; }
+  } else if (date < now) {
+    date.setDate(date.getDate() + 1); // "at 9" when 9 has passed means tomorrow
+  }
+  if (!hasTime) date.setHours(0, 0);
+  return { text: cap(rest || 'Event'), at: date.getTime(), allDay: !hasTime };
+}
+
+// A reminder is "remind me to…" or anything with a relative time like "in 20 minutes"
+function findRem(c) {
+  const isRem = REM_RE.test(c), rel = c.match(IN_RE);
+  if (!isRem && !rel) return null;
+  let rest = c.replace(REM_RE, '');
+  let at = null;
+  if (rel) {
+    rest = rest.replace(rel[0], ' ');
+    const half = /half/i.test(rel[1]);
+    const n = half ? 30 : /^an?$/i.test(rel[1]) ? 1 : +rel[1];
+    at = Date.now() + n * (/^h/i.test(rel[2]) && !half ? HOUR : MIN);
+  } else {
+    const w = findWhen(rest);
+    if (w) {
+      if (w.allDay) w.at += 9 * HOUR; // a reminder with only a day goes off at 9 AM
+      return { text: w.text, at: w.at };
+    }
+  }
+  rest = rest.replace(/\s+/g, ' ').trim();
+  return { text: cap(rest || 'Reminder'), at };
+}
+
+// Returns segments: { raw, cat, items[] } — raw keeps the spoken words for the transcript.
+function parse(text) {
+  const clauses = text.replace(/\s+/g, ' ')
+    .replace(/(\d)(st|nd|rd|th)?,\s*(\d{4})\b/gi, '$1$2 $3') // keep "nov 6th, 2026" in one piece
+    .split(/[,;]|(?<=[a-z]{3})[.!?](?:\s|$)|\s+then\s+/i)
+    .flatMap(c => c.split(AND_SPLIT))
+    .map(c => c.trim()).filter(Boolean);
+  return clauses.map(raw => {
+    const c = raw.replace(FILLER_RE, '');
+    if (NOTE_RE.test(c)) return { raw, cat: 'note', items: [{ text: cap(c.replace(NOTE_RE, '')) }] };
+    const rem = findRem(c);
+    if (rem) return { raw, cat: 'rem', items: [rem] };
+    if (SHOP_RE.test(c)) {
+      const list = c.replace(SHOP_RE, '').split(/\s+and\s+|\s*&\s*/)
+        .map(s => s.replace(/^(?:some|a|an|the|more)\s+/i, '').trim()).filter(Boolean);
+      return { raw, cat: 'shop', items: list.map(s => ({ text: cap(s) })) };
+    }
+    const when = findWhen(c);
+    if (when) return { raw, cat: 'cal', items: [when] };
+    return { raw, cat: 'task', items: [{ text: cap(c) }] };
+  }).filter(s => s.items.length && s.items[0].text);
+}
+
+// ---------- Elements and helpers ----------
+const $ = id => document.getElementById(id);
+const app = $('app'), stage = $('stage'), stack = $('stack');
+const orbBtn = $('orbBtn'), orbLabel = $('orbLabel'), canvas = $('orb'), ctx = canvas.getContext('2d');
+const transcript = $('transcript'), hint = $('hint'), typeForm = $('typeForm'), typeInput = $('typeInput'), err = $('err');
+const sheet = $('sheet'), sheetBody = $('sheetBody'), sheetTitle = $('sheetTitle'), sheetSub = $('sheetSub'), swipeHint = $('swipeHint');
+const takeover = $('takeover'), toastEl = $('toast');
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const sleep = ms => new Promise(r => setTimeout(r, reduced ? 0 : ms));
+const rel = el => { const a = app.getBoundingClientRect(), r = el.getBoundingClientRect(); return { x: r.left - a.left, y: r.top - a.top, w: r.width, h: r.height }; };
+const buzz = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch {} };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function el(tag, cls, html) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (html) n.innerHTML = html;
+  return n;
+}
+const X_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+
+let toastTimer;
+function toast(msg) {
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1800);
+}
+
+$('date').textContent = new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+
+// ---------- Wallet stack ----------
+const cards = {};
+stack.style.height = `calc(var(--peek) * ${STACK_ORDER.length - 1} + var(--card-h))`;
+STACK_ORDER.forEach((cat, i) => {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = `card c-${cat}`;
+  b.style.top = `calc(var(--peek) * ${i})`;
+  b.style.zIndex = i + 1;
+  b.style.scale = 1 - (STACK_ORDER.length - 1 - i) * 0.02;
+  b.innerHTML = `<div class="top"><span class="name">${CATS[cat].name}</span><span class="count"></span></div><div class="prev"></div>`;
+  b.addEventListener('click', () => openSheet(cat));
+  stack.appendChild(b);
+  cards[cat] = b;
+});
+
+function dayCell(t) {
+  const d = new Date(t);
+  return `<b>${d.toLocaleDateString('en-US', { weekday: 'narrow' })}</b>${d.getDate()}<i${hasEvent(t) ? '' : ' class="none"'}></i>`;
+}
+
+function updateCard(cat) {
+  const items = state.items[cat], b = cards[cat];
+  const right = b.querySelector('.count'), prev = b.querySelector('.prev');
+  right.className = 'count';
+  b.setAttribute('aria-label', `${CATS[cat].name}, ${items.length} items`);
+
+  if (cat === 'cal') {
+    // The calendar card's face is the coming week, with dots on busy days
+    right.classList.add('month');
+    right.textContent = new Date().toLocaleDateString('en-US', { month: 'long' });
+    const today = startOfDay(Date.now());
+    const week = Array.from({ length: 7 }, (_, i) => addDays(today, i));
+    const next = nextCal();
+    prev.innerHTML = `<div class="week">${week.map((t, i) => `<span class="wd${i === 0 ? ' on' : ''}">${dayCell(t)}</span>`).join('')}</div>`
+      + `<span class="nextline">${next ? 'Next: ' + esc(label(next, 'cal')) : 'Nothing coming up'}</span>`;
+    return;
+  }
+  if (cat === 'rem') {
+    // The reminders strip shows a countdown to the next one instead of a count
+    const next = nextRem();
+    if (next) {
+      const over = next.at <= Date.now();
+      right.innerHTML = `<span class="chip${over ? ' over' : ''}">${over ? 'Overdue' : next.at - Date.now() < DAY ? relLabel(next.at) : esc(whenLabel(next))}</span>`;
+    } else {
+      right.textContent = items.length;
+    }
+  } else {
+    right.textContent = items.length;
+  }
+  prev.innerHTML = items.length
+    ? items.slice(0, 2).map(it => `<span>${esc(label(it, cat))}</span>`).join('')
+    : '<span>Nothing yet</span>';
+}
+const updateAll = () => STACK_ORDER.forEach(updateCard);
+const bump = cat => cards[cat].animate(
+  [{ translate: '0 0' }, { translate: '0 -12px' }, { translate: '0 0' }],
+  { duration: 420, easing: 'cubic-bezier(.3,1.6,.5,1)' });
+
+// ---------- The orb ----------
+let mode = 'idle', level = 0, orbSize = 200;
+const dpr = Math.min(window.devicePixelRatio || 1, 2);
+const LAYERS = [
+  { r: 0.40, a: 0.22, c: '157,140,255' },
+  { r: 0.35, a: 0.45, c: '157,140,255' },
+  { r: 0.29, a: 0.8,  c: '196,186,255' },
+  { r: 0.22, a: 1,    c: '238,234,255' },
+];
+
+function sizeOrb() {
+  const avail = stage.clientHeight - 150;
+  orbSize = Math.round(Math.max(110, Math.min(stage.clientWidth * 0.72, avail, 260)));
+  orbBtn.style.width = orbBtn.style.height = orbSize + 'px';
+  canvas.width = canvas.height = orbSize * dpr;
+}
+
+function drawOrb(now) {
+  const t = reduced ? now * 0.2 : now;
+  const s = orbSize, c = s / 2;
+  const target = mode === 'listening' ? 0.55 + 0.45 * Math.abs(Math.sin(t * 0.009)) * Math.random()
+    : mode === 'sorting' ? 0.25 : 0.06;
+  level += (target - level) * 0.1;
+  const amp = s * (0.008 + level * 0.045);
+  const breathe = 1 + 0.025 * Math.sin(t * 0.002);
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, s, s);
+  const glow = ctx.createRadialGradient(c, c, s * 0.1, c, c, s * 0.5);
+  glow.addColorStop(0, `rgba(157,140,255,${0.28 + level * 0.25})`);
+  glow.addColorStop(1, 'rgba(157,140,255,0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, s, s);
+
+  LAYERS.forEach((L, i) => {
+    ctx.beginPath();
+    for (let k = 0; k <= 72; k++) {
+      const th = (k / 72) * Math.PI * 2;
+      const wob = Math.sin(th * 3 + t * 0.0016 * (i + 1)) * 0.6 + Math.sin(th * 5 - t * 0.0011 * (i + 2)) * 0.4;
+      const rr = s * L.r * breathe + amp * (1 - i * 0.18) * wob;
+      const x = c + Math.cos(th) * rr, y = c + Math.sin(th) * rr;
+      k ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = `rgba(${L.c},${L.a})`;
+    ctx.fill();
+  });
+  requestAnimationFrame(drawOrb);
+}
+
+function setMode(m) {
+  mode = m;
+  orbLabel.textContent = { idle: 'Tap to talk', listening: 'Listening', sorting: 'Sorting' }[m];
+  orbBtn.setAttribute('aria-label', m === 'idle' ? 'Start talking' : orbLabel.textContent);
+}
+
+// ---------- Capture flow: transcript → sort → cards fly into the stack ----------
+let busy = false, sampleIdx = 0;
+
+// Shows words as they arrive, reusing the spans already on screen so only new words animate in
+function showWords(text) {
+  const words = text.split(/\s+/).filter(Boolean), spans = transcript.children;
+  words.forEach((w, i) => {
+    if (spans[i]) { if (spans[i].textContent !== w) spans[i].textContent = w; }
+    else transcript.append(el('span', 'w', esc(w)));
+  });
+  while (spans.length > words.length) spans[spans.length - 1].remove();
+}
+
+// Once sorted, redraw the transcript one part at a time and sweep each word into its card's color
+function colorWords(segs) {
+  transcript.textContent = '';
+  let n = 0;
+  segs.forEach((sg, s) => {
+    const words = sg.raw.split(/\s+/).filter(Boolean);
+    words.forEach((w, i) => {
+      const last = i === words.length - 1 && s < segs.length - 1 && !/[,.!?]$/.test(w);
+      const span = el('span', 'w settled', esc(w + (last ? ',' : '')));
+      span.dataset.cat = sg.cat;
+      transcript.append(span);
+      setTimeout(() => span.classList.add('lit'), reduced ? 0 : 35 * n++);
+    });
+  });
+}
+
+function finishIdle() {
+  setMode('idle');
+  hint.hidden = false;
+  busy = false;
+}
+
+async function capture(text, { spoken = false, wordDelay = 120 } = {}) {
+  busy = true;
+  hint.hidden = true;
+  typeForm.hidden = true;
+  transcript.classList.remove('fade');
+  if (!spoken) {
+    // Typed text and samples appear word by word, as if spoken
+    setMode('listening');
+    transcript.textContent = '';
+    const words = text.split(/\s+/).filter(Boolean);
+    for (let i = 1; i <= words.length; i++) {
+      showWords(words.slice(0, i).join(' '));
+      await sleep(wordDelay);
+    }
+    await sleep(300);
+  }
+
+  setMode('sorting');
+  const segs = await sortText(text);
+  if (!segs.length) {
+    transcript.classList.add('fade');
+    await sleep(300);
+    transcript.textContent = '';
+    finishIdle();
+    toast('Nothing to sort in that');
+    return;
+  }
+  colorWords(segs);
+  await sleep(700);
+  const items = segs.flatMap(sg => sg.items.map(it => ({ ...it, cat: sg.cat })));
+  await Promise.all(items.map((it, i) => fly(it, i, items.length)));
+
+  transcript.classList.add('fade');
+  await sleep(300);
+  transcript.textContent = '';
+  finishIdle();
+  toast(`${items.length} ${items.length === 1 ? 'item' : 'items'} sorted`);
+}
+
+// ---------- Sorting: Claude through our server, with the built-in rules as a fallback ----------
+const pad = n => String(n).padStart(2, '0');
+function localNow() {
+  const d = new Date();
+  return `${d.toLocaleDateString('en-US', { weekday: 'long' })}, ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+// Claude answers in the phone's local time ("2026-11-06T09:00"); turn that into a timestamp here
+function toTs(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(s || '');
+  return m ? new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5]).getTime() : null;
+}
+
+function fromAi(segments) {
+  return segments.filter(sg => CATS[sg.category]).map(sg => ({
+    raw: sg.quote,
+    cat: sg.category,
+    items: sg.items.filter(i => i.text).map(i => {
+      const at = toTs(i.datetime);
+      if (sg.category === 'cal') return { text: i.text, at: at ?? startOfDay(Date.now()), allDay: at == null || i.all_day };
+      if (sg.category === 'rem') return { text: i.text, at: at != null && i.all_day ? at + 9 * HOUR : at };
+      return { text: i.text };
+    }),
+  })).filter(sg => sg.items.length);
+}
+
+let aiOk = true, toldOffline = false;
+async function sortText(text) {
+  if (aiOk) {
+    try {
+      const res = await fetch('/api/sort', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, now: localNow() }),
+        signal: AbortSignal.timeout(20000),
+      });
+      if (res.ok) return fromAi((await res.json()).segments);
+      if ([404, 405, 503].includes(res.status)) aiOk = false; // no AI behind this page: stop asking
+    } catch {
+      // Offline, timed out, or no server (like the hosted preview): fall through
+    }
+    if (!toldOffline) { toldOffline = true; toast('AI unavailable, using basic sorting'); }
+  }
+  return parse(text);
+}
+
+// ---------- Speech: the phone's own speech recognition, words appear as you talk ----------
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let speechOk = !!SR, activeRec = null;
+
+function setHint() {
+  $('hintText').textContent = speechOk ? 'Tap the orb and say anything.' : 'Prototype: the orb plays sample phrases.';
+}
+
+const playSample = () => capture(SAMPLES[sampleIdx++ % SAMPLES.length], { wordDelay: 150 });
+
+function micUnavailable() {
+  speechOk = false;
+  setHint();
+  toast('Microphone unavailable here. Playing a sample');
+  playSample();
+}
+
+function listen() {
+  const rec = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+  rec.lang = navigator.language || 'en-US';
+  rec.interimResults = true;
+  rec.continuous = false; // stops on its own when you pause
+  let heard = '', failed = '';
+  busy = true;
+  hint.hidden = true;
+  typeForm.hidden = true;
+  transcript.classList.remove('fade');
+  transcript.textContent = '';
+  setMode('listening');
+
+  rec.onresult = e => {
+    heard = [...e.results].map(r => r[0].transcript).join(' ').replace(/\s+/g, ' ').trim();
+    showWords(heard);
+    level = 1; // the orb jumps with each new word
+  };
+  rec.onerror = e => { failed = e.error; };
+  rec.onend = () => {
+    activeRec = null;
+    if (['not-allowed', 'service-not-allowed', 'audio-capture'].includes(failed)) return micUnavailable();
+    if (!heard) {
+      transcript.textContent = '';
+      finishIdle();
+      toast(failed === 'network' ? 'Speech service unreachable. Try typing' : 'Didn’t catch that. Try again');
+      return;
+    }
+    capture(heard, { spoken: true });
+  };
+  activeRec = rec;
+  try { rec.start(); } catch { activeRec = null; micUnavailable(); }
+}
+
+function addItem(it) {
+  const { cat, ...data } = it;
+  state.items[cat].unshift({ ...data, id: uid(), created: Date.now() });
+  save();
+  updateCard(cat);
+}
+
+function fly(it, i, n) {
+  if (reduced) { addItem(it); return Promise.resolve(); }
+  return new Promise(resolve => {
+    setTimeout(() => {
+      const el = document.createElement('div');
+      el.className = `fly c-${it.cat}`;
+      el.textContent = label(it, it.cat);
+      app.appendChild(el);
+      const tr = rel(transcript), card = rel(cards[it.cat]);
+      const x0 = tr.x + tr.w / 2 - el.offsetWidth / 2 + (i - (n - 1) / 2) * 16;
+      const y0 = tr.y + tr.h / 2 - el.offsetHeight / 2;
+      const x1 = card.x + card.w / 2 - el.offsetWidth / 2;
+      const y1 = card.y + 8;
+      el.animate([
+        { transform: `translate(${x0}px, ${y0}px) scale(.6)`, opacity: 0 },
+        { transform: `translate(${x0}px, ${y0 - 18}px) scale(1)`, opacity: 1, offset: 0.22 },
+        { transform: `translate(${x1}px, ${y1}px) scale(.5)`, opacity: 0.9 },
+      ], { duration: 780, easing: 'cubic-bezier(.55,0,.35,1)', fill: 'forwards' }).onfinish = () => {
+        el.remove();
+        addItem(it);
+        bump(it.cat);
+        buzz(8);
+        resolve();
+      };
+    }, i * 160);
+  });
+}
+
+// Feedback fires on press, before the click, so the orb reacts the instant a finger lands
+function tapFeedback() {
+  level = 1;
+  buzz(12);
+}
+orbBtn.addEventListener('pointerdown', tapFeedback);
+
+orbBtn.addEventListener('click', e => {
+  if (e.detail === 0) tapFeedback(); // keyboard press: no pointerdown happened
+  if (activeRec) { activeRec.stop(); return; } // tap again to finish talking
+  if (busy) return;
+  if (speechOk) listen();
+  else playSample();
+});
+
+$('typeBtn').addEventListener('click', () => {
+  hint.hidden = true;
+  typeForm.hidden = false;
+  typeInput.focus();
+});
+typeInput.addEventListener('input', () => { err.hidden = true; });
+typeForm.addEventListener('submit', e => {
+  e.preventDefault();
+  const v = typeInput.value.trim();
+  if (!v) { err.textContent = 'Type something to sort first.'; err.hidden = false; typeInput.focus(); return; }
+  if (!parse(v).length) { err.textContent = 'Couldn’t find anything to sort in that.'; err.hidden = false; return; }
+  typeInput.value = '';
+  capture(v, { wordDelay: 60 });
+});
+
+$('reset').addEventListener('click', () => {
+  state = fresh();
+  save();
+  updateAll();
+  toast('Examples restored');
+});
+
+// ---------- Expanded sheet ----------
+let current = null, calDay = startOfDay(Date.now()), heroKey = '';
+
+function openSheet(cat) {
+  if (busy) return;
+  current = cat;
+  if (cat === 'cal') {
+    // Open on today, or on the next busy day if today is free
+    const next = nextCal();
+    calDay = hasEvent(Date.now()) || !next ? startOfDay(Date.now()) : startOfDay(next.at);
+  }
+  sheet.style.setProperty('--catc', `var(--${cat})`);
+  takeover.style.setProperty('--catc', `var(--${cat})`);
+  renderSheet();
+  sheetBody.scrollTop = 0;
+  sheet.hidden = false;
+  sheet.classList.remove('open');
+  const r = rel(cards[cat]), a = app.getBoundingClientRect();
+  const from = `inset(${r.y}px ${a.width - r.x - r.w}px ${a.height - r.y - r.h}px ${r.x}px round 26px)`;
+  sheet.animate([{ clipPath: from }, { clipPath: 'inset(0px 0px 0px 0px round 0px)' }],
+    { duration: reduced ? 0 : 520, easing: 'cubic-bezier(.2,.8,.2,1)' });
+  requestAnimationFrame(() => requestAnimationFrame(() => sheet.classList.add('open')));
+  $('back').focus();
+}
+
+function closeSheet() {
+  if (sheet.hidden) return;
+  const cat = current;
+  sheet.classList.remove('open');
+  const r = rel(cards[cat]), a = app.getBoundingClientRect();
+  const to = `inset(${r.y}px ${a.width - r.x - r.w}px ${a.height - r.y - r.h}px ${r.x}px round 26px)`;
+  sheet.animate([{ clipPath: 'inset(0px 0px 0px 0px round 0px)' }, { clipPath: to }],
+    { duration: reduced ? 0 : 420, easing: 'cubic-bezier(.4,0,.2,1)' }).onfinish = () => {
+    sheet.hidden = true;
+    cards[cat].focus();
+  };
+}
+
+function renderSheet() {
+  const stripX = sheetBody.querySelector('.strip')?.scrollLeft || 0, y = sheetBody.scrollTop;
+  sheetBody.innerHTML = '';
+  if (current === 'cal') renderCal();
+  else if (current === 'rem') renderRem();
+  else renderList();
+  const strip = sheetBody.querySelector('.strip');
+  if (strip) strip.scrollLeft = stripX;
+  sheetBody.scrollTop = y;
+}
+
+const emptyMsg = (text, parent = sheetBody) => parent.appendChild(el('p', 'empty', esc(text || CATS[current].empty)));
+
+// To-dos, Shopping, Notes: a plain swipeable list
+function renderList() {
+  const items = state.items[current], d = state.done[current];
+  sheetTitle.textContent = CATS[current].name;
+  sheetSub.textContent = `${items.length} left` + (d ? ` · ${d} done today` : '');
+  swipeHint.innerHTML = 'Swipe right to finish<br>Swipe left to remove';
+  if (!items.length) return emptyMsg();
+  const ul = el('ul', 'list');
+  items.forEach(it => ul.appendChild(makeRow(it)));
+  sheetBody.appendChild(ul);
+}
+
+// Calendar: a scrollable strip of the next two weeks, then the chosen day as a timeline
+const HOUR_H = 52;
+function renderCal() {
+  const now = Date.now();
+  const evs = state.items.cal.filter(e => sameDay(e.at, calDay)).sort((a, b) => a.at - b.at);
+  sheetTitle.textContent = dayLabel(calDay, true);
+  const date = new Date(calDay).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  sheetSub.textContent = `${date} · ${evs.length ? `${evs.length} ${evs.length === 1 ? 'event' : 'events'}` : 'nothing planned'}`;
+  swipeHint.textContent = 'Tap a day to see it';
+
+  const strip = el('div', 'strip'), pill = el('span', 'pill');
+  strip.appendChild(pill);
+  for (let i = 0; i < 14; i++) {
+    const t = addDays(startOfDay(now), i);
+    const b = el('button', 'wd' + (t === calDay ? ' on' : ''), dayCell(t));
+    b.type = 'button';
+    b.setAttribute('aria-pressed', t === calDay);
+    b.setAttribute('aria-label', new Date(t).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }));
+    b.addEventListener('click', () => {
+      if (t === calDay) return;
+      calDir = Math.sign(t - calDay);
+      calDay = t;
+      renderSheet();
+    });
+    strip.appendChild(b);
+  }
+  sheetBody.appendChild(strip);
+
+  // Everything below the strip lives in one block so it can slide in as a unit
+  const day = el('div');
+  sheetBody.appendChild(day);
+  animateDaySwitch(strip, pill, day);
+
+  if (!evs.length) {
+    // Only suggest a phrase the sorter understands: today, tomorrow or a weekday this week
+    const word = dayLabel(calDay, true), near = calDay - startOfDay(now) < 7 * DAY;
+    const say = /^(Today|Tomorrow)$/.test(word) ? word.toLowerCase() : word;
+    return emptyMsg(near ? `A free day. Say "gym ${say} at 6" and it lands here.` : 'A free day.', day);
+  }
+  const allDay = evs.filter(e => e.allDay), timed = evs.filter(e => !e.allDay);
+  if (allDay.length) {
+    const wrap = el('div', 'allday');
+    allDay.forEach(e => wrap.appendChild(eventBlock(e, true)));
+    day.appendChild(wrap);
+  }
+  if (!timed.length) return;
+
+  const hrs = timed.map(e => new Date(e.at).getHours());
+  const start = Math.min(8, ...hrs), end = Math.min(24, Math.max(21, Math.max(...hrs) + 2));
+  const tl = el('div', 'timeline');
+  for (let h = start; h < end; h++) tl.appendChild(el('div', 'hour', `<span>${timeLabel(new Date(calDay).setHours(h))}</span>`));
+  timed.forEach(e => {
+    const d = new Date(e.at);
+    const b = eventBlock(e, false);
+    b.style.top = ((d.getHours() - start) + d.getMinutes() / 60) * HOUR_H + 2 + 'px';
+    tl.appendChild(b);
+  });
+  if (sameDay(now, calDay)) {
+    const d = new Date(now), h = d.getHours() + d.getMinutes() / 60;
+    if (h >= start && h < end) {
+      const line = el('div', 'nowline');
+      line.style.top = (h - start) * HOUR_H + 'px';
+      tl.appendChild(line);
+    }
+  }
+  day.appendChild(tl);
+}
+
+// Day switch: the pill glides to the new day, and the day's content slides in from that side.
+// calDir is -1 (earlier day), 1 (later day) or 0 (sheet just opened: no motion).
+let calDir = 0, pillX = null;
+function animateDaySwitch(strip, pill, day) {
+  const dir = calDir;
+  calDir = 0;
+  // Wait a frame so the strip has its final layout before measuring the selected day
+  requestAnimationFrame(() => {
+    const on = strip.querySelector('.wd.on');
+    const moving = dir && pillX != null && !reduced;
+    if (moving) pill.style.transform = `translateX(${pillX}px)`;
+    pill.style.transition = 'none';
+    pill.style.width = on.offsetWidth + 'px';
+    pill.style.height = on.offsetHeight + 'px';
+    pill.offsetWidth; // commit the starting position before turning the transition back on
+    if (moving) pill.style.transition = '';
+    pill.style.transform = `translateX(${on.offsetLeft}px)`;
+    pillX = on.offsetLeft;
+    if (dir) on.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: reduced ? 'auto' : 'smooth' });
+
+    if (!moving) return;
+    const dx = dir * 28, ease = 'cubic-bezier(.2,.8,.2,1)';
+    [sheetTitle, sheetSub].forEach((n, i) =>
+      n.animate([{ opacity: 0, transform: `translateX(${dx * 0.6}px)`, offset: 0 }], { duration: 260, delay: i * 30, easing: ease, fill: 'backwards' }));
+    day.animate([{ opacity: 0, transform: `translateX(${dx}px)`, offset: 0 }], { duration: 300, easing: ease });
+    day.querySelectorAll('.ev').forEach((n, i) =>
+      n.animate([{ opacity: 0, scale: 0.96, offset: 0 }], { duration: 260, delay: 90 + i * 50, easing: 'ease-out', fill: 'backwards' }));
+  });
+}
+
+function eventBlock(e, allDay) {
+  const past = allDay ? startOfDay(e.at) < startOfDay(Date.now()) : e.at + HOUR < Date.now();
+  const b = el('div', 'ev' + (past ? ' past' : ''),
+    `<b>${esc(e.text)}</b><small>${allDay ? 'All day' : timeLabel(e.at)}</small><button type="button" class="x" aria-label="Remove ${esc(e.text)}">${X_SVG}</button>`);
+  b.querySelector('.x').addEventListener('click', () => finish(e, b, 'remove'));
+  return b;
+}
+
+// Reminders: a hero card counting down to the next one, then the rest grouped by when
+function renderRem() {
+  const now = Date.now(), items = state.items.rem;
+  const timed = items.filter(i => i.at != null).sort((a, b) => a.at - b.at);
+  const next = timed[0];
+  sheetTitle.textContent = 'Reminders';
+  sheetSub.textContent = `${items.length} set` + (state.done.rem ? ` · ${state.done.rem} done today` : '');
+  swipeHint.innerHTML = 'Swipe right when done<br>Swipe left to snooze';
+  heroKey = next ? next.id + (next.at <= now) : '';
+  if (!items.length) return emptyMsg();
+  if (next) sheetBody.appendChild(makeHero(next, now));
+
+  const rest = timed.slice(1);
+  [
+    ['Overdue', rest.filter(i => i.at <= now)],
+    ['Later today', rest.filter(i => i.at > now && sameDay(i.at, now))],
+    ['Coming up', rest.filter(i => i.at > now && !sameDay(i.at, now))],
+    ['No time set', items.filter(i => i.at == null)],
+  ].forEach(([name, group]) => {
+    if (!group.length) return;
+    sheetBody.appendChild(el('p', 'group', name));
+    const ul = el('ul', 'list');
+    group.forEach(it => {
+      const over = it.at != null && it.at <= now;
+      const chip = it.at == null ? '' : over ? 'Overdue' : sameDay(it.at, now) ? timeLabel(it.at) : whenLabel(it);
+      ul.appendChild(makeRow(it, { rightLabel: 'Snooze 10 min', leftAction: 'snooze', chip, over }));
+    });
+    sheetBody.appendChild(ul);
+  });
+}
+
+const left = (from, to) => Math.max(0, Math.min(100, ((to - Date.now()) / Math.max(1, to - from)) * 100));
+
+function makeHero(it, now) {
+  const over = it.at <= now, soon = it.at - now < DAY, from = it.created || now;
+  const div = el('div', 'hero' + (over ? ' over' : ''),
+    `<span class="lbl">${over ? 'Overdue' : 'Next reminder'}</span>
+    <span class="big"${!over && soon ? ` data-until="${it.at}"` : ''}>${over ? timeLabel(it.at) : soon ? countdown(it.at) : esc(whenLabel(it))}</span>
+    <span class="what">${esc(it.text)}</span>
+    ${over ? '' : `<span class="bar"><i data-from="${from}" data-to="${it.at}" style="width:${left(from, it.at)}%"></i></span>`}
+    <div class="hero-actions"><button type="button" class="primary">Done</button><button type="button" class="secondary">Snooze 10 min</button></div>`);
+  const [done, snooze] = div.querySelectorAll('button');
+  done.addEventListener('click', () => { const r = rel(done); finish(it, null, 'done', r.x + r.w / 2, r.y + r.h / 2); });
+  snooze.addEventListener('click', () => finish(it, null, 'snooze'));
+  return div;
+}
+
+function makeRow(it, { rightLabel = 'Remove', leftAction = 'remove', chip = '', over = false } = {}) {
+  const li = el('li', 'row',
+    `<div class="row-bg" aria-hidden="true"><span class="l">Done</span><span class="r${leftAction === 'snooze' ? ' soft' : ''}">${rightLabel}</span></div>
+    <div class="row-fg"><button class="tick" type="button" aria-label="Mark ${esc(it.text)} done"></button>
+    <span class="txt">${esc(it.text)}</span>${chip ? `<span class="when${over ? ' over' : ''}">${esc(chip)}</span>` : ''}</div>`);
+  const fg = li.querySelector('.row-fg'), tick = li.querySelector('.tick');
+  tick.addEventListener('click', () => {
+    const t = rel(tick);
+    finish(it, li, 'done', t.x + t.w / 2, t.y + t.h / 2);
+  });
+  bindSwipe(li, fg, (dir, x, y) => finish(it, li, dir === 'done' ? 'done' : leftAction, x, y));
+  return li;
+}
+
+function bindSwipe(li, fg, onCommit) {
+  let x0 = 0, y0 = 0, dx = 0, drag = false, id = null;
+  fg.addEventListener('pointerdown', e => {
+    if (e.target.closest('.tick')) return;
+    x0 = e.clientX; y0 = e.clientY; dx = 0; drag = false; id = e.pointerId;
+    fg.style.transition = 'none';
+  });
+  fg.addEventListener('pointermove', e => {
+    if (id !== e.pointerId) return;
+    const mx = e.clientX - x0, my = e.clientY - y0;
+    if (!drag) {
+      if (Math.abs(mx) > 8 && Math.abs(mx) > Math.abs(my)) { drag = true; fg.setPointerCapture(id); }
+      else if (Math.abs(my) > 10) { id = null; return; }
+      else return;
+    }
+    dx = mx;
+    fg.style.transform = `translateX(${dx}px)`;
+    li.dataset.dir = dx > 0 ? 'done' : 'remove';
+    const armed = Math.abs(dx) > fg.offsetWidth * 0.33;
+    if (armed !== li.classList.contains('armed')) { li.classList.toggle('armed', armed); if (armed) buzz(10); }
+  });
+  const end = e => {
+    if (id !== e.pointerId) return;
+    id = null;
+    if (!drag) return;
+    fg.style.transition = 'transform .28s cubic-bezier(.2,.8,.2,1)';
+    if (Math.abs(dx) > fg.offsetWidth * 0.33) {
+      const a = app.getBoundingClientRect();
+      onCommit(dx > 0 ? 'done' : 'remove', e.clientX - a.left, e.clientY - a.top);
+    } else {
+      fg.style.transform = '';
+      li.classList.remove('armed');
+    }
+  };
+  fg.addEventListener('pointerup', end);
+  fg.addEventListener('pointercancel', end);
+}
+
+// action: 'done' | 'remove' | 'snooze'. node is the row or block to animate away (or null).
+async function finish(it, node, action, x, y) {
+  if (node) {
+    if (node.dataset.gone) return;
+    node.dataset.gone = '1';
+    const fg = node.querySelector('.row-fg');
+    if (fg) {
+      node.dataset.dir = action === 'done' ? 'done' : 'remove';
+      fg.style.transition = 'transform .25s cubic-bezier(.4,0,.2,1)';
+      fg.style.transform = `translateX(${action === 'done' ? '' : '-'}110%)`;
+      await sleep(230);
+    }
+    await node.animate([{ height: node.offsetHeight + 'px', opacity: 1 }, { height: '0px', opacity: 0 }],
+      { duration: reduced ? 0 : 220, easing: 'ease-in', fill: 'forwards' }).finished;
+  }
+  buzz(action === 'done' ? 14 : 8);
+
+  const cat = current;
+  if (action === 'snooze') {
+    it.at = Date.now() + 10 * MIN;
+    it.created = Date.now();
+    toast('Snoozed for 10 min');
+  } else {
+    state.items[cat] = state.items[cat].filter(o => o.id !== it.id);
+    if (action === 'done') state.done[cat]++;
+  }
+  save();
+  updateCard(cat);
+  if (action === 'done' && !state.items[cat].length) showTakeover(cat, x, y);
+  else renderSheet();
+}
+
+// ---------- The reward: full-screen takeover when a list is cleared ----------
+function showTakeover(cat, x, y) {
+  const d = state.done[cat];
+  takeover.innerHTML = `<svg viewBox="0 0 100 100" aria-hidden="true"><path d="M20 52 L42 72 L82 28"/></svg>
+    <h3>${CATS[cat].name},<br>cleared.</h3>
+    <p>${d} ${d === 1 ? 'thing' : 'things'} done today. Tap anywhere to go back.</p>`;
+  takeover.style.opacity = 1;
+  takeover.hidden = false;
+  takeover.animate([{ clipPath: `circle(0px at ${x}px ${y}px)` }, { clipPath: `circle(150% at ${x}px ${y}px)` }],
+    { duration: reduced ? 0 : 650, easing: 'cubic-bezier(.6,0,.2,1)' });
+  buzz([20, 60, 30]);
+}
+
+takeover.addEventListener('click', async () => {
+  takeover.style.opacity = 0;
+  await sleep(300);
+  takeover.hidden = true;
+  renderSheet();
+  closeSheet();
+});
+
+$('back').addEventListener('click', closeSheet);
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (!takeover.hidden) takeover.click();
+  else closeSheet();
+});
+
+// ---------- Live clock: countdowns tick every second ----------
+setInterval(() => {
+  document.querySelectorAll('[data-until]').forEach(n => { n.textContent = countdown(+n.dataset.until); });
+  document.querySelectorAll('[data-to]').forEach(n => { n.style.width = left(+n.dataset.from, +n.dataset.to) + '%'; });
+  updateCard('rem');
+  if (!sheet.hidden && current === 'rem' && takeover.hidden) {
+    const n = nextRem(), key = n ? n.id + (n.at <= Date.now()) : '';
+    if (key !== heroKey) renderSheet(); // the next reminder just went off, or changed
+  }
+}, 1000);
+
+// ---------- Boot ----------
+setHint();
+updateAll();
+sizeOrb();
+addEventListener('resize', sizeOrb);
+requestAnimationFrame(drawOrb);
+</script>

@@ -1,0 +1,16 @@
+{
+  "name": "blurt",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Say it. It sorts itself.",
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.js"
+  },
+  "engines": {
+    "node": ">=22.9"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "1.3.0"
+  }
+}
