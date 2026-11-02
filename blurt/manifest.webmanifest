@@ -1,0 +1,25 @@
+{
+  "name": "Blurt",
+  "short_name": "Blurt",
+  "description": "Say it. It sorts itself into your calendar, reminders, to-dos, shopping and notes.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0E0C15",
+  "theme_color": "#0E0C15",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Blurt now", "short_name": "Talk", "description": "Open and start listening", "url": "/?listen=1", "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] },
+    { "name": "Today’s 3", "short_name": "Today", "url": "/?view=top", "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] }
+  ],
+  "share_target": {
+    "action": "/",
+    "method": "GET",
+    "params": { "title": "title", "text": "text", "url": "url" }
+  }
+}
