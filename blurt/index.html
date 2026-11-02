@@ -1172,14 +1172,44 @@ function bestGuess(result) {
   }
   return best.transcript.trim();
 }
-// Some Android versions repeat everything said so far in each new phrase; only add what's new.
-// A pause usually means a new thing, so phrases are joined with a comma for the sorter.
-function addPhrase(said, phrase) {
-  if (!phrase) return said;
-  const a = said.toLowerCase(), p = phrase.toLowerCase();
-  if (a && p.startsWith(a)) { const added = phrase.slice(said.length).trim(); return added ? `${said}, ${added}` : said; }
-  if (a.endsWith(p)) return said;
-  return said ? `${said}, ${phrase}` : phrase;
+// Chrome on Android sends speech in messy ways: the same phrase growing word by word ("go", "go to", "go to the doctor"),
+// everything said so far again with new words on the end, or the whole list re-sent. This keeps one clean copy.
+// Phrases separated by a real pause are joined with a comma, since a pause usually means a new thing.
+const norm = s => s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim();
+const wordCount = s => s ? s.split(' ').length : 0;
+const wordsAfter = (s, n) => s.trim().split(/\s+/).slice(n).join(' ');
+const PAUSE_MS = 900;
+
+function phraseJoiner() {
+  const phrases = [];
+  let lastAt = 0;
+  const text = () => phrases.join(', ');
+  const all = () => norm(phrases.join(' '));
+  return {
+    text,
+    add(p, now = Date.now()) {
+      const np = norm(p), sofar = all(), last = norm(phrases.at(-1) || '');
+      const paused = now - lastAt > PAUSE_MS;
+      if (!np) return;
+      lastAt = now;
+      if (sofar.endsWith(np) || (wordCount(np) >= 3 && sofar.includes(np))) return; // already have it
+      if (last && last.startsWith(np)) return;                                   // a shorter copy of the last phrase
+      if (sofar && np.startsWith(sofar)) {                                         // everything so far, plus new words
+        const tail = wordsAfter(p, wordCount(sofar));
+        if (paused) phrases.push(tail); else phrases[phrases.length - 1] += ' ' + tail;
+        return;
+      }
+      if (last && np.startsWith(last)) { phrases[phrases.length - 1] = p.trim(); return; } // the last phrase, grown
+      phrases.push(p.trim());
+    },
+    // Words still being heard, minus anything already kept
+    withPending(p) {
+      const np = norm(p), sofar = all();
+      if (!np || sofar.endsWith(np)) return text();
+      const extra = sofar && np.startsWith(sofar) ? wordsAfter(p, wordCount(sofar)) : p.trim();
+      return `${text()} ${extra}`.trim();
+    },
+  };
 }
 
 function listen() {
@@ -1188,7 +1218,9 @@ function listen() {
   rec.interimResults = true;
   rec.continuous = true;
   rec.maxAlternatives = 3;
-  let finals = '', heard = '', failed = '', quiet = null;
+  const said = phraseJoiner();
+  const taken = [];
+  let heard = '', failed = '', quiet = null;
   const stop = () => { try { rec.stop(); } catch {} };
   const waitFor = ms => { clearTimeout(quiet); quiet = setTimeout(stop, ms); };
   const cap = setTimeout(stop, MAX_MS);
@@ -1204,10 +1236,12 @@ function listen() {
     let pending = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const r = e.results[i];
-      if (r.isFinal) finals = addPhrase(finals, bestGuess(r));
-      else pending += ' ' + r[0].transcript;
+      if (r.isFinal) {
+        const g = bestGuess(r);
+        if (taken[i] !== norm(g)) { said.add(g); taken[i] = norm(g); } // a finished phrase is only taken once, even if re-sent
+      } else pending += ' ' + r[0].transcript;
     }
-    heard = `${finals} ${pending}`.replace(/\s+/g, ' ').trim();
+    heard = said.withPending(pending);
     showWords(heard);
     level = 1; // the orb jumps with each new word
     orbLabel.textContent = 'Tap when done';
