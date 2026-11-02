@@ -17,6 +17,8 @@ const client = new Anthropic();
 // ---------- What Claude is asked to do ----------
 const SYSTEM = `You sort a voice note into a personal organizer. People speak quickly and casually, often several things in one breath. Split what they said into separate parts and file each one.
 
+The transcript comes from the phone's speech recognition, so it can contain mishearings: words that sound alike ("by eggs" for "buy eggs", "for" or "to" for the numbers 4 and 2, "remind me too"), missing punctuation and run-on sentences. Work out what the speaker meant and use the corrected words in titles. Quotes stay exactly as transcribed.
+
 Categories:
 - cal: something that happens at a time or on a day: appointments, meetings, plans, events. Always has a date.
 - rem: a nudge to do something at a moment: "remind me to…", "in 20 minutes…". The time is optional.

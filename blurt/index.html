@@ -69,6 +69,9 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 @keyframes w-in { from { opacity: 0; transform: translateY(6px); } }
 .hint { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; text-align: center; max-width: 34ch; }
 .link { color: var(--fg); text-decoration: underline; text-underline-offset: 3px; }
+.lang { appearance: none; -webkit-appearance: none; background: transparent; border: 0; color: var(--muted); font: inherit; font-size: 13px; text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; padding: 0 2px; max-width: 16ch; }
+.lang:hover { color: var(--fg); }
+.lang option { background: var(--surface); color: var(--fg); }
 #typeForm { width: 100%; display: flex; flex-direction: column; gap: 6px; }
 .type-row { display: flex; gap: 8px; }
 #typeInput { flex: 1; min-width: 0; background: var(--surface); border: 1px solid var(--line); color: var(--fg); border-radius: 14px; padding: 12px 14px; font: inherit; }
@@ -187,6 +190,9 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 .review-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .review-head h2 { margin: 0; font-family: var(--display); font-weight: 800; font-size: 24px; letter-spacing: -0.02em; }
 .review-head span { color: var(--muted); font-size: 12px; text-align: right; }
+.said { display: flex; align-items: flex-end; gap: 10px; font-size: 13px; line-height: 1.45; color: var(--muted); }
+.said q { flex: 1; min-width: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.said .link { flex: none; font-size: 13px; }
 .rlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; overflow-y: auto; overscroll-behavior: contain; min-height: 0; }
 .ritem { position: relative; flex: none; display: flex; flex-direction: column; gap: 8px; padding: 6px; border-radius: 16px; background: var(--surface); border: 1px solid var(--line); transition: opacity 0.2s; }
 .ritem.lifted { opacity: 0.4; }
@@ -271,7 +277,9 @@ button.txt { text-align: left; align-self: stretch; display: flex; flex-directio
       <span class="orb-label" id="orbLabel">Tap to talk</span>
     </button>
     <p class="transcript" id="transcript" aria-live="polite"></p>
-    <p class="hint" id="hint"><span id="hintText"></span> <button class="link" id="typeBtn" type="button">Type instead</button></p>
+    <p class="hint" id="hint"><span id="hintText"></span><br>
+      <button class="link" id="typeBtn" type="button">Type instead</button> ·
+      <select class="lang" id="langSel" aria-label="Language you speak in"></select></p>
     <form id="typeForm" hidden>
       <div class="type-row">
         <input id="typeInput" type="text" autocomplete="off" placeholder="Gym tomorrow at 7, buy bananas and oats">
@@ -281,6 +289,7 @@ button.txt { text-align: left; align-self: stretch; display: flex; flex-directio
     </form>
     <section class="review" id="review" hidden aria-label="Check before saving">
       <div class="review-head"><h2>Look right?</h2><span>Tap a color to move it,<br>or drag it onto a card</span></div>
+      <div class="said"><q id="saidText"></q><button class="link" id="resay" type="button">Fix the words</button></div>
       <ul class="rlist" id="rlist"></ul>
       <div class="review-actions">
         <button class="quiet" id="discard" type="button">Discard</button>
@@ -882,8 +891,19 @@ async function capture(text, { spoken = false, wordDelay = 120 } = {}) {
 
   // Nothing is saved until you've had a look
   const found = segs.flatMap(sg => sg.items.map(it => ({ ...it, cat: sg.cat })));
+  $('saidText').textContent = text;
   const picked = await openReview(found);
   transcript.textContent = '';
+  if (fixing) {
+    // Misheard? Put the words in the type box to correct, then sort again
+    fixing = false;
+    finishIdle();
+    hint.hidden = true;
+    typeForm.hidden = false;
+    typeInput.value = text;
+    typeInput.focus();
+    return;
+  }
   if (!picked || !picked.length) {
     finishIdle();
     toast(picked ? 'Nothing saved' : 'Discarded');
@@ -1051,6 +1071,8 @@ $('saveAll').addEventListener('click', () => {
   closeReview(picked);
 });
 $('discard').addEventListener('click', () => closeReview(null));
+let fixing = false;
+$('resay').addEventListener('click', () => { fixing = true; closeReview(null); });
 
 // ---------- Sorting: Claude through our server, with the built-in rules as a fallback ----------
 const pad = n => String(n).padStart(2, '0');
@@ -1102,6 +1124,24 @@ async function sortText(text) {
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let speechOk = !!SR, activeRec = null;
 
+// The language you speak in. Recognition is much worse when it doesn't match, e.g. English spoken on an Arabic phone.
+const LANGS = [
+  ['', 'Phone language'], ['en-US', 'English (US)'], ['en-GB', 'English (UK)'], ['en-AU', 'English (Australia)'], ['en-IN', 'English (India)'],
+  ['ar-EG', 'Arabic (Egypt)'], ['ar-SA', 'Arabic (Saudi Arabia)'], ['fr-FR', 'French'], ['de-DE', 'German'], ['es-ES', 'Spanish'],
+  ['it-IT', 'Italian'], ['pt-BR', 'Portuguese (Brazil)'], ['tr-TR', 'Turkish'], ['hi-IN', 'Hindi'],
+];
+const LANG_KEY = 'blurt.lang';
+const getLang = () => { try { return localStorage.getItem(LANG_KEY) || ''; } catch { return ''; } };
+const speechLang = () => getLang() || navigator.language || 'en-US';
+const langSel = $('langSel');
+langSel.innerHTML = LANGS.map(([v, n]) => `<option value="${v}">${n}</option>`).join('');
+langSel.value = getLang();
+langSel.addEventListener('change', () => {
+  try { localStorage.setItem(LANG_KEY, langSel.value); } catch {}
+  // The built-in rules only read English; the AI sorter handles any language
+  toast(/^en/.test(speechLang()) ? `Listening in ${langSel.selectedOptions[0].text}` : 'Basic sorting is English only. The AI handles this language');
+});
+
 // The hint nudges you to empty your head again when it's been a while, or at the end of the day
 function setHint() {
   const h = new Date().getHours(), quiet = state.lastDump && Date.now() - state.lastDump > DAY;
@@ -1118,26 +1158,65 @@ function micUnavailable() {
   playSample();
 }
 
+// Keeps listening through short pauses, so a ramble isn't cut off mid-thought.
+// It stops when you tap the orb, go quiet for a moment, or after a minute.
+const FIRST_WORD_MS = 8000, QUIET_MS = 2500, MAX_MS = 60000;
+
+// The recognizer can offer a few guesses per phrase. Prefer the one that sounds like something to sort.
+const SORT_HINT = /\b(?:buy|get|grab|remind|call|meet|pick up|today|tonight|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next week|at \d|\d\s?(?:am|pm))\b/i;
+function bestGuess(result) {
+  let best = result[0], top = -1;
+  for (let i = 0; i < result.length; i++) {
+    const s = (result[i].confidence || 0) + (SORT_HINT.test(result[i].transcript) ? 0.15 : 0);
+    if (s > top) { top = s; best = result[i]; }
+  }
+  return best.transcript.trim();
+}
+// Some Android versions repeat everything said so far in each new phrase; only add what's new.
+// A pause usually means a new thing, so phrases are joined with a comma for the sorter.
+function addPhrase(said, phrase) {
+  if (!phrase) return said;
+  const a = said.toLowerCase(), p = phrase.toLowerCase();
+  if (a && p.startsWith(a)) { const added = phrase.slice(said.length).trim(); return added ? `${said}, ${added}` : said; }
+  if (a.endsWith(p)) return said;
+  return said ? `${said}, ${phrase}` : phrase;
+}
+
 function listen() {
   const rec = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-  rec.lang = navigator.language || 'en-US';
+  rec.lang = speechLang();
   rec.interimResults = true;
-  rec.continuous = false; // stops on its own when you pause
-  let heard = '', failed = '';
+  rec.continuous = true;
+  rec.maxAlternatives = 3;
+  let finals = '', heard = '', failed = '', quiet = null;
+  const stop = () => { try { rec.stop(); } catch {} };
+  const waitFor = ms => { clearTimeout(quiet); quiet = setTimeout(stop, ms); };
+  const cap = setTimeout(stop, MAX_MS);
   busy = true;
   hint.hidden = true;
   typeForm.hidden = true;
   transcript.classList.remove('fade');
   transcript.textContent = '';
   setMode('listening');
+  waitFor(FIRST_WORD_MS);
 
   rec.onresult = e => {
-    heard = [...e.results].map(r => r[0].transcript).join(' ').replace(/\s+/g, ' ').trim();
+    let pending = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const r = e.results[i];
+      if (r.isFinal) finals = addPhrase(finals, bestGuess(r));
+      else pending += ' ' + r[0].transcript;
+    }
+    heard = `${finals} ${pending}`.replace(/\s+/g, ' ').trim();
     showWords(heard);
     level = 1; // the orb jumps with each new word
+    orbLabel.textContent = 'Tap when done';
+    waitFor(QUIET_MS);
   };
   rec.onerror = e => { failed = e.error; };
   rec.onend = () => {
+    clearTimeout(quiet);
+    clearTimeout(cap);
     activeRec = null;
     if (['not-allowed', 'service-not-allowed', 'audio-capture'].includes(failed)) return micUnavailable();
     if (!heard) {
