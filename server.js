@@ -1,5 +1,6 @@
-// Blurt server: serves the app from blurt/ and sorts what you said with Claude.
-// Run with `npm start`. Needs ANTHROPIC_API_KEY in .env (see .env.example).
+// Blurt server: serves the app from blurt/ and sorts what you said with AI.
+// Run with `npm start`. Sorting uses Claude when ANTHROPIC_API_KEY is set, or Google's free
+// Gemini tier when only GEMINI_API_KEY is set (see .env.example).
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -10,9 +11,11 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, 'blurt');
 const PORT = Number(process.env.PORT) || 5181;
 const MODEL = 'claude-opus-5-5';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
 const MAX_TEXT = 2000;
 
 const client = new Anthropic();
+const provider = () => process.env.ANTHROPIC_API_KEY ? 'claude' : process.env.GEMINI_API_KEY ? 'gemini' : null;
 
 // ---------- What Claude is asked to do ----------
 const SYSTEM = `You sort a voice note into a personal organizer. People speak quickly and casually, often several things in one breath. Split what they said into separate parts and file each one.
@@ -67,7 +70,9 @@ const SCHEMA = {
   },
 };
 
-async function sort(text, now) {
+const prompt = (text, now) => `Current date and time: ${now}\n\nTranscript:\n"""${text}"""`;
+
+async function sortWithClaude(text, now) {
   const response = await client.beta.messages.create({
     model: MODEL,
     max_tokens: 4000,
@@ -77,13 +82,52 @@ async function sort(text, now) {
     // Sorting is quick work: low effort keeps it fast
     output_config: { effort: 'low', format: { type: 'json_schema', schema: SCHEMA } },
     system: SYSTEM,
-    messages: [{ role: 'user', content: `Current date and time: ${now}\n\nTranscript:\n"""${text}"""` }],
+    messages: [{ role: 'user', content: prompt(text, now) }],
   });
   if (response.stop_reason === 'refusal') throw Object.assign(new Error('refused'), { status: 422 });
   const block = response.content.find(b => b.type === 'text');
   if (!block) throw new Error('No text in response');
   return JSON.parse(block.text);
 }
+
+// Free for testing: Google's Gemini free tier. Google may use free-tier prompts to improve its
+// products, so this is for trying Blurt out, not for real users' data.
+class GeminiError extends Error {}
+
+async function callGemini(text, now, withSchema) {
+  const generationConfig = { responseMimeType: 'application/json', temperature: 0 };
+  if (withSchema) generationConfig.responseJsonSchema = SCHEMA;
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: SYSTEM + (withSchema ? '' : `\n\nReply with JSON only, matching this JSON schema:\n${JSON.stringify(SCHEMA)}`) }] },
+      contents: [{ role: 'user', parts: [{ text: prompt(text, now) }] }],
+      generationConfig,
+    }),
+  }).catch(() => { throw Object.assign(new GeminiError('Could not reach Gemini'), { status: 502 }); });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw Object.assign(new GeminiError(`Gemini ${res.status}: ${detail.slice(0, 300)}`), { status: res.status });
+  }
+  const data = await res.json();
+  const out = data.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('');
+  if (!out) throw Object.assign(new GeminiError('No text from Gemini'), { status: 422 });
+  const result = JSON.parse(out);
+  if (!Array.isArray(result?.segments)) throw new GeminiError('Gemini returned the wrong shape');
+  return result;
+}
+
+async function sortWithGemini(text, now) {
+  try { return await callGemini(text, now, true); }
+  catch (e) {
+    // If this model won't take the schema, ask for the same JSON in the prompt instead
+    if (e.status === 400 && /schema/i.test(e.message)) return callGemini(text, now, false);
+    throw e;
+  }
+}
+
+const sort = (text, now) => provider() === 'claude' ? sortWithClaude(text, now) : sortWithGemini(text, now);
 
 // ---------- HTTP ----------
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
@@ -103,7 +147,7 @@ async function readJson(req) {
 }
 
 async function handleSort(req, res) {
-  if (!process.env.ANTHROPIC_API_KEY) return send(res, 503, { error: 'AI not set up' });
+  if (!provider()) return send(res, 503, { error: 'AI not set up' });
   let body;
   try { body = await readJson(req); } catch (e) { return send(res, e.status || 400, { error: 'Send JSON with text and now.' }); }
   const { text, now } = body || {};
@@ -113,7 +157,7 @@ async function handleSort(req, res) {
   try {
     const started = Date.now();
     const result = await sort(text.trim(), now);
-    console.log(`sorted in ${Date.now() - started} ms: ${result.segments.length} parts`);
+    console.log(`${provider()} sorted in ${Date.now() - started} ms: ${result.segments.length} parts`);
     send(res, 200, result);
   } catch (e) {
     if (e instanceof Anthropic.AuthenticationError) {
@@ -123,6 +167,13 @@ async function handleSort(req, res) {
     if (e instanceof Anthropic.RateLimitError) return send(res, 429, { error: 'Too many requests, try again shortly' });
     if (e instanceof Anthropic.APIConnectionError) return send(res, 502, { error: 'Could not reach Claude' });
     if (e instanceof Anthropic.APIError) { console.error('Claude API error:', e.status, e.message); return send(res, 502, { error: 'AI error' }); }
+    if (e instanceof GeminiError) {
+      console.error(e.message);
+      if ([400, 401, 403, 404].includes(e.status)) return send(res, 503, { error: 'AI not set up' });
+      if (e.status === 429) return send(res, 429, { error: 'Too many requests, try again shortly' });
+      return send(res, 502, { error: 'AI error' });
+    }
+    if (e instanceof SyntaxError) { console.error('AI sent back invalid JSON'); return send(res, 502, { error: 'AI error' }); }
     if (e.status === 422) return send(res, 422, { error: 'Could not sort that' });
     console.error(e);
     send(res, 500, { error: 'Sorting failed' });
@@ -146,5 +197,8 @@ http.createServer((req, res) => {
   send(res, 405, 'Method not allowed', 'text/plain');
 }).listen(PORT, () => {
   console.log(`Blurt running on http://localhost:${PORT}`);
-  if (!process.env.ANTHROPIC_API_KEY) console.log('No ANTHROPIC_API_KEY yet: the app will use its built-in sorter. See .env.example.');
+  const p = provider();
+  if (p === 'claude') console.log(`Sorting with Claude (${MODEL})`);
+  else if (p === 'gemini') console.log(`Sorting with Gemini's free tier (${GEMINI_MODEL}), for testing only`);
+  else console.log('No AI key yet: the app will use its built-in sorter. See .env.example.');
 });

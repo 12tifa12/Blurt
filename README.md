@@ -10,11 +10,13 @@ Needs Node.js 22.9 or newer.
 
 ```bash
 npm install
-cp .env.example .env   # then paste your Anthropic API key into .env
+cp .env.example .env   # then paste an API key into .env
 npm start
 ```
 
 Open http://localhost:5181 in Chrome. Without a key, Blurt still works using its built-in sorting rules.
+
+For free testing, leave `ANTHROPIC_API_KEY` empty and set `GEMINI_API_KEY` from [Google AI Studio](https://aistudio.google.com/apikey) instead. Google's free tier has rate limits and may use prompts to improve Google's products, so use it to try Blurt out, not for other people's data. When both keys are set, Claude is used.
 
 ## What it does
 
@@ -33,7 +35,7 @@ Open http://localhost:5181 in Chrome. Without a key, Blurt still works using its
 - `blurt/index.html`: the whole app (orb, review, card stack, lists, editor).
 - `blurt/sw.js`: the service worker. It lets the app open offline and handles the buttons on notifications.
 - `blurt/manifest.webmanifest`: the install details, home-screen shortcuts and share target.
-- `server.js`: serves the app and exposes `POST /api/sort`, which asks Claude to split the transcript into cards and resolve dates and times.
+- `server.js`: serves the app and exposes `POST /api/sort`, which asks the AI (Claude, or Gemini for free testing) to split the transcript into cards and resolve dates and times.
 
 The API key stays on the server and is never sent to the browser.
 
