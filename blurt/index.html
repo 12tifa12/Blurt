@@ -285,7 +285,7 @@ header { position: relative; }
       <div id="menuMain" class="menu-list">
         <button type="button" id="backupBtn">Save a backup</button>
         <button type="button" id="restoreBtn">Restore a backup</button>
-        <button type="button" id="reset">Reset to examples</button>
+        <button type="button" id="reset">Reset everything</button>
       </div>
       <div id="menuAsk" class="menu-ask" hidden>
         <p id="menuAskText"></p>
@@ -1445,7 +1445,7 @@ restoreFile.addEventListener('change', async () => {
   askMenu(`Replace your ${countItems(state)} items with the ${n} in this backup?`, 'Replace', () => swapData(next, `Restored ${n} items`));
 });
 $('reset').addEventListener('click', () => {
-  askMenu(`Erase your ${countItems(state)} items and bring back the examples?`, 'Erase', () => swapData(fillIn(fresh()), 'Examples restored'));
+  askMenu(`Erase all ${countItems(state)} items? This can't be undone.`, 'Erase', () => swapData(fillIn({ items: {}, lastDump: 0 }), 'Everything erased'));
 });
 $('menuNo').addEventListener('click', () => showMenu(false));
 $('menuYes').addEventListener('click', () => {
