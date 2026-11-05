@@ -253,6 +253,18 @@ button.txt { text-align: left; align-self: stretch; display: flex; flex-directio
 .sugg small { display: block; font-size: 12px; color: var(--ink-soft); margin-top: 2px; }
 .sugg .add { flex: none; font-size: 13px; font-weight: 600; background: var(--ink); color: var(--catc); padding: 5px 11px; border-radius: 999px; }
 .head-actions { display: flex; gap: 8px; }
+header { position: relative; }
+.menu { position: absolute; top: calc(100% + 8px); right: 0; z-index: 45; width: min(260px, 100%); box-sizing: border-box; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 6px; }
+.menu-list { display: flex; flex-direction: column; }
+.menu-list button { padding: 11px 12px; border-radius: 10px; font-size: 14px; text-align: left; color: var(--fg); }
+.menu-list button:hover { background: var(--line); }
+.menu-ask { padding: 8px; display: flex; flex-direction: column; gap: 12px; }
+.menu-ask p { margin: 0; font-size: 14px; line-height: 1.4; color: var(--fg); }
+.menu-ask-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.menu-yes { background: var(--fg); color: var(--ink); font-size: 13px; font-weight: 600; padding: 6px 12px; border-radius: 999px; }
+.save-warn { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); font-size: 13px; line-height: 1.35; }
+.save-warn span { flex: 1; min-width: 0; }
+.save-warn button { flex: none; font-size: 13px; font-weight: 600; color: var(--fg); text-decoration: underline; }
 
 .toast { position: absolute; top: 58px; left: 50%; z-index: 40; translate: -50% -16px; opacity: 0; background: var(--surface); border: 1px solid var(--line); padding: 8px 16px; border-radius: 999px; font-size: 13px; white-space: nowrap; pointer-events: none; transition: opacity 0.3s, translate 0.3s; }
 .toast.show { opacity: 1; translate: -50% 0; }
@@ -267,9 +279,28 @@ button.txt { text-align: left; align-self: stretch; display: flex; flex-directio
     <div><span class="brand">Blurt</span><span class="date" id="date"></span></div>
     <div class="head-actions">
       <button class="ghost" id="topBtn" type="button">Today</button>
-      <button class="ghost" id="reset" type="button">Reset</button>
+      <button class="ghost" id="moreBtn" type="button" aria-expanded="false" aria-controls="moreMenu">More</button>
     </div>
+    <div class="menu" id="moreMenu" hidden>
+      <div id="menuMain" class="menu-list">
+        <button type="button" id="backupBtn">Save a backup</button>
+        <button type="button" id="restoreBtn">Restore a backup</button>
+        <button type="button" id="reset">Reset to examples</button>
+      </div>
+      <div id="menuAsk" class="menu-ask" hidden>
+        <p id="menuAskText"></p>
+        <div class="menu-ask-actions">
+          <button type="button" class="ghost" id="menuNo">Cancel</button>
+          <button type="button" class="menu-yes" id="menuYes"></button>
+        </div>
+      </div>
+    </div>
+    <input type="file" id="restoreFile" accept=".json,application/json" hidden>
   </header>
+  <div class="save-warn" id="saveWarn" role="alert" hidden>
+    <span>Blurt couldn't save on this phone. Your latest changes may be lost.</span>
+    <button type="button" id="saveWarnBackup">Save a backup</button>
+  </div>
 
   <main class="stage" id="stage">
     <button class="orb-btn" id="orbBtn" type="button" aria-label="Start talking">
@@ -434,15 +465,22 @@ function load() {
   try { const s = JSON.parse(localStorage.getItem(KEY)); return s && s.items ? s : null; } catch { return null; }
 }
 function save() {
-  try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {}
+  let ok = true;
+  try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { ok = false; }
+  // A failed save must not pass silently: the phone may be out of space or blocking storage
+  document.getElementById('saveWarn').hidden = ok;
 }
-let state = load() || fresh();
-// Saved data from an older version may be missing newer cards
-for (const k in CATS) {
-  state.items[k] = state.items[k] || [];
-  state.done[k] = state.done[k] || 0;
+// Saved data or a backup from an older version may be missing newer cards
+function fillIn(s) {
+  s.done = s.done || {};
+  for (const k in CATS) {
+    s.items[k] = s.items[k] || [];
+    s.done[k] = s.done[k] || 0;
+  }
+  s.top = s.top || [];
+  return s;
 }
-state.top = state.top || [];
+let state = fillIn(load() || fresh());
 
 // Lookups across all lists
 const catOf = it => Object.keys(CATS).find(k => state.items[k].includes(it));
@@ -1100,18 +1138,22 @@ function fromAi(segments) {
   })).filter(sg => sg.items.length);
 }
 
+// AI sorting is invite-only: a tester's link (/?code=...) is remembered on their phone
+const INVITE_KEY = 'blurt.invite';
+const getInvite = () => { try { return localStorage.getItem(INVITE_KEY) || ''; } catch { return ''; } };
+
 let aiOk = true, toldOffline = false;
 async function sortText(text) {
   if (aiOk) {
     try {
       const res = await fetch('/api/sort', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Blurt-Invite': getInvite() },
         body: JSON.stringify({ text, now: localNow() }),
         signal: AbortSignal.timeout(20000),
       });
       if (res.ok) return fromAi((await res.json()).segments);
-      if ([404, 405, 503].includes(res.status)) aiOk = false; // no AI behind this page: stop asking
+      if ([401, 404, 405, 503].includes(res.status)) aiOk = false; // no AI for this page or person: stop asking
     } catch {
       // Offline, timed out, or no server (like the hosted preview): fall through
     }
@@ -1335,12 +1377,81 @@ typeForm.addEventListener('submit', e => {
   capture(v, { wordDelay: 60 });
 });
 
-$('reset').addEventListener('click', () => {
-  state = fresh();
+// ---------- More menu: backup, restore, reset ----------
+const moreBtn = $('moreBtn'), moreMenu = $('moreMenu'), restoreFile = $('restoreFile');
+let menuYes = null;
+
+function showMenu(open) {
+  moreMenu.hidden = !open;
+  moreBtn.setAttribute('aria-expanded', open);
+  $('menuMain').hidden = false;
+  $('menuAsk').hidden = true;
+  menuYes = null;
+}
+// Anything that replaces your data asks first, inside the menu
+function askMenu(text, yes, action) {
+  $('menuAskText').textContent = text;
+  $('menuYes').textContent = yes;
+  menuYes = action;
+  moreMenu.hidden = false;
+  $('menuMain').hidden = true;
+  $('menuAsk').hidden = false;
+}
+const countItems = s => Object.keys(CATS).reduce((n, k) => n + (s.items[k] || []).length, 0);
+
+function swapData(next, msg) {
+  state = next;
   save();
   updateAll();
   updateTopBtn();
-  toast('Examples restored');
+  toast(msg);
+}
+
+function saveBackup() {
+  const stamp = new Date().toISOString().slice(0, 10);
+  downloadFile(`blurt-backup-${stamp}.json`, JSON.stringify({ app: 'blurt', version: 2, savedAt: new Date().toISOString(), state }, null, 2), 'application/json');
+  toast('Backup saved to your downloads');
+}
+
+// Only takes what Blurt knows how to show, so a wrong or damaged file can't break the app
+function readBackup(raw) {
+  const data = JSON.parse(raw), from = data && data.app === 'blurt' && data.state;
+  if (!from || typeof from.items !== 'object' || !from.items) throw new Error('Not a Blurt backup');
+  const s = { items: {}, done: {}, top: [], lastDump: Number(from.lastDump) || 0 };
+  for (const k in CATS) {
+    const list = Array.isArray(from.items[k]) ? from.items[k] : [];
+    s.items[k] = list.filter(it => it && typeof it.text === 'string').map(it => ({ ...it, id: typeof it.id === 'string' ? it.id : uid() }));
+    s.done[k] = Number(from.done && from.done[k]) || 0;
+  }
+  if (Array.isArray(from.top)) s.top = from.top.filter(id => typeof id === 'string');
+  return s;
+}
+
+moreBtn.addEventListener('click', () => showMenu(moreMenu.hidden));
+document.addEventListener('pointerdown', e => {
+  if (!moreMenu.hidden && !moreMenu.contains(e.target) && !moreBtn.contains(e.target)) showMenu(false);
+});
+$('backupBtn').addEventListener('click', () => { showMenu(false); saveBackup(); });
+$('saveWarnBackup').addEventListener('click', saveBackup);
+$('restoreBtn').addEventListener('click', () => restoreFile.click());
+restoreFile.addEventListener('change', async () => {
+  const file = restoreFile.files[0];
+  restoreFile.value = '';
+  if (!file) return;
+  let next;
+  try { next = readBackup(await file.text()); }
+  catch { showMenu(false); toast("That file isn't a Blurt backup"); return; }
+  const n = countItems(next);
+  askMenu(`Replace your ${countItems(state)} items with the ${n} in this backup?`, 'Replace', () => swapData(next, `Restored ${n} items`));
+});
+$('reset').addEventListener('click', () => {
+  askMenu(`Erase your ${countItems(state)} items and bring back the examples?`, 'Erase', () => swapData(fillIn(fresh()), 'Examples restored'));
+});
+$('menuNo').addEventListener('click', () => showMenu(false));
+$('menuYes').addEventListener('click', () => {
+  const action = menuYes;
+  showMenu(false);
+  if (action) action();
 });
 
 // ---------- Expanded sheet ----------
@@ -2016,6 +2127,11 @@ requestAnimationFrame(drawOrb);
 // Ways in from outside the app: the home-screen shortcut (?listen), the share sheet (?text), notification buttons (?act)
 const params = new URLSearchParams(location.search);
 if (location.search) history.replaceState(null, '', location.pathname);
+if (params.get('code')) {
+  try { localStorage.setItem(INVITE_KEY, params.get('code').trim().slice(0, 64)); } catch {}
+}
+// Ask the browser not to clear Blurt's data when the phone runs low on space
+if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 if (params.get('act')) handleAct({ act: params.get('act'), id: params.get('id') });
 const shared = ['title', 'text', 'url'].map(k => params.get(k)).filter(Boolean).join(' ').trim();
 if (shared) setTimeout(() => capture(shared.slice(0, 2000), { wordDelay: 40 }), 400);

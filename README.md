@@ -16,7 +16,11 @@ npm start
 
 Open http://localhost:5181 in Chrome. Without a key, Blurt still works using its built-in sorting rules.
 
-For free testing, leave `ANTHROPIC_API_KEY` empty and set `GEMINI_API_KEY` from [Google AI Studio](https://aistudio.google.com/apikey) instead. Google's free tier has rate limits and may use prompts to improve Google's products, so use it to try Blurt out, not for other people's data. When both keys are set, Claude is used.
+To try AI sorting for free yourself, leave `ANTHROPIC_API_KEY` empty and set `GEMINI_API_KEY` from [Google AI Studio](https://aistudio.google.com/apikey) instead. Google's free tier has rate limits and may use prompts to improve Google's products, so don't use a free key with other people's data. When both keys are set, Claude is used (Haiku unless `CLAUDE_MODEL` says otherwise).
+
+## Inviting testers
+
+On a hosted server, AI sorting only works for people with an invite. Set `INVITE_CODES` to a comma-separated list with one hard-to-guess code per tester, and send each one their link: `https://your-site/?code=THEIR_CODE`. The phone remembers it. Anyone without a code gets the built-in sorter. `SORTS_PER_INVITE_PER_DAY` (default 30) and `SORTS_PER_DAY` (default 300) cap the bill, and the server log shows each tester's use.
 
 ## What it does
 
@@ -28,6 +32,7 @@ For free testing, leave `ANTHROPIC_API_KEY` empty and set `GEMINI_API_KEY` from 
 - **Calendar export.** Each event has an "Add to Google Calendar" link and a .ics download, and Export on the Calendar or Reminders card saves everything coming up as one .ics file with alerts.
 - **Shopping smarts.** It picks up amounts ("2 dozen eggs", "500g beef"), merges repeats ("milk" said twice), groups items by store aisle, and Share sends the list as text.
 - **Today's 3.** You pick three things to do today, with suggestions from due reminders, today's events and the to-dos that have waited longest. To-dos older than 3 days show how long they've waited.
+- **Backup and restore.** More > Save a backup downloads your data as a file, and Restore a backup brings it back after asking first. If the phone can't save, Blurt shows a warning instead of losing your changes quietly.
 - **Installable app.** Chrome's "Install app" adds it to the home screen. Long-press the icon for "Blurt now" and "Today's 3". Blurt also shows up in Android's share sheet, so you can share text into it.
 
 ## How it fits together

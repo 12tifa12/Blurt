@@ -18,7 +18,7 @@ self.addEventListener('fetch', e => {
   const req = e.request, url = new URL(req.url);
   if (req.method !== 'GET' || url.pathname.startsWith('/api/')) return;
   e.respondWith(fetch(req).then(res => {
-    if ((res.ok || res.type === 'opaque') && !url.search.includes('text=')) {
+    if ((res.ok || res.type === 'opaque') && !/(text|code)=/.test(url.search)) {
       const copy = res.clone();
       caches.open(CACHE).then(c => c.put(req, copy));
     }
