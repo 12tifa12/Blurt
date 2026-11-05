@@ -193,6 +193,7 @@ header { display: flex; align-items: center; justify-content: space-between; gap
 .said { display: flex; align-items: flex-end; gap: 10px; font-size: 13px; line-height: 1.45; color: var(--muted); }
 .said q { flex: 1; min-width: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .said .link { flex: none; font-size: 13px; }
+.said-actions { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .rlist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; overflow-y: auto; overscroll-behavior: contain; min-height: 0; }
 .ritem { position: relative; flex: none; display: flex; flex-direction: column; gap: 8px; padding: 6px; border-radius: 16px; background: var(--surface); border: 1px solid var(--line); transition: opacity 0.2s; }
 .ritem.lifted { opacity: 0.4; }
@@ -320,7 +321,7 @@ header { position: relative; }
     </form>
     <section class="review" id="review" hidden aria-label="Check before saving">
       <div class="review-head"><h2>Look right?</h2><span>Tap a color to move it,<br>or drag it onto a card</span></div>
-      <div class="said"><q id="saidText"></q><button class="link" id="resay" type="button">Fix the words</button></div>
+      <div class="said"><q id="saidText"></q><span class="said-actions"><button class="link" id="resay" type="button">Fix the words</button><button class="link" id="keepTalking" type="button">Keep talking</button></span></div>
       <ul class="rlist" id="rlist"></ul>
       <div class="review-actions">
         <button class="quiet" id="discard" type="button">Discard</button>
@@ -942,6 +943,13 @@ async function capture(text, { spoken = false, wordDelay = 120 } = {}) {
     typeInput.focus();
     return;
   }
+  if (continuing) {
+    // Cut off or forgot something? Listen again, carrying on from these words
+    continuing = false;
+    finishIdle();
+    listen(text);
+    return;
+  }
   if (!picked || !picked.length) {
     finishIdle();
     toast(picked ? 'Nothing saved' : 'Discarded');
@@ -1109,8 +1117,9 @@ $('saveAll').addEventListener('click', () => {
   closeReview(picked);
 });
 $('discard').addEventListener('click', () => closeReview(null));
-let fixing = false;
+let fixing = false, continuing = false;
 $('resay').addEventListener('click', () => { fixing = true; closeReview(null); });
+$('keepTalking').addEventListener('click', () => { continuing = true; closeReview(null); });
 
 // ---------- Sorting: Claude through our server, with the built-in rules as a fallback ----------
 const pad = n => String(n).padStart(2, '0');
@@ -1165,6 +1174,7 @@ async function sortText(text) {
 // ---------- Speech: the phone's own speech recognition, words appear as you talk ----------
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let speechOk = !!SR, activeRec = null;
+$('keepTalking').hidden = !speechOk;
 
 // The language you speak in. Recognition is much worse when it doesn't match, e.g. English spoken on an Arabic phone.
 const LANGS = [
@@ -1201,8 +1211,11 @@ function micUnavailable() {
 }
 
 // Keeps listening through short pauses, so a ramble isn't cut off mid-thought.
-// It stops when you tap the orb, go quiet for a moment, or after a minute.
-const FIRST_WORD_MS = 8000, QUIET_MS = 2500, MAX_MS = 60000;
+// It stops when you tap the orb, go quiet for a while, or after two minutes.
+const FIRST_WORD_MS = 10000, QUIET_MS = 6000, STILL_MS = 3000, MAX_MS = 120000;
+// Android's engine can end by itself during a pause. Restart it, unless one of these says it can't carry on.
+const NO_RESTART = ['not-allowed', 'service-not-allowed', 'audio-capture', 'network', 'aborted', 'language-not-supported'];
+const QUICK_END_MS = 500;
 
 // The recognizer can offer a few guesses per phrase. Prefer the one that sounds like something to sort.
 const SORT_HINT = /\b(?:buy|get|grab|remind|call|meet|pick up|today|tonight|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|next week|at \d|\d\s?(?:am|pm))\b/i;
@@ -1254,7 +1267,41 @@ function phraseJoiner() {
   };
 }
 
-function listen() {
+// Cleans up how people really talk, keeping only changes that are safe without understanding the words.
+// Words that can also mean something ("like", "I mean") are left for the AI.
+const SOUND_FILLERS = new Set(['um', 'umm', 'uh', 'uhh', 'uhm', 'er', 'erm', 'ah', 'hmm', 'mm', 'امم', 'ممم', 'ااا']);
+const HANGING = new Set(['the', 'a', 'an', 'to', 'at', 'for', 'my', 'of', 'on', 'in', 'with', 'and', 'or', 'في', 'على', 'من', 'عند', 'مع']);
+const JOINS_BACK = new Set(['at', 'on', 'by', 'with', 'of', 'for', 'from']);
+const TRAILING = new Set(['the', 'a', 'an', 'and', 'or']);
+
+function tidySpeech(text, { done = false } = {}) {
+  const w = [];
+  for (const t of text.split(/\s+/)) {
+    const n = norm(t);
+    if (n && !SOUND_FILLERS.has(n)) { w.push(t); continue; }
+    if (t.endsWith(',') && w.length && !w.at(-1).endsWith(',')) w[w.length - 1] += ','; // a dropped filler keeps its pause
+  }
+  // The same words twice in a row: keep the second go. Lone numbers stay, "room 2 2" may be right.
+  for (let size = 4; size >= 1; size--) {
+    for (let i = 0; i + size * 2 <= w.length;) {
+      const first = w.slice(i, i + size).map(norm), again = w.slice(i + size, i + size * 2).map(norm);
+      const same = first.every((x, j) => x === again[j]) && !(size === 1 && /^\p{N}+$/u.test(first[0]));
+      if (same) w.splice(i, size); else i++;
+    }
+  }
+  // A comma from a pause mid-thought: "call the, dentist", "dentist, at 4"
+  for (let i = 0; i < w.length - 1; i++) {
+    if (w[i].endsWith(',') && (HANGING.has(norm(w[i])) || JOINS_BACK.has(norm(w[i + 1])))) w[i] = w[i].slice(0, -1);
+  }
+  if (done) {
+    // A thought that trailed off: "buy eggs and"
+    while (w.length && TRAILING.has(norm(w.at(-1)))) w.pop();
+    if (w.length) w[w.length - 1] = w.at(-1).replace(/,$/, '');
+  }
+  return w.join(' ');
+}
+
+function listen(earlier = '') {
   const rec = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
   rec.lang = speechLang();
   rec.interimResults = true;
@@ -1262,16 +1309,18 @@ function listen() {
   rec.maxAlternatives = 3;
   const said = phraseJoiner();
   const taken = [];
-  let heard = '', failed = '', quiet = null;
-  const stop = () => { try { rec.stop(); } catch {} };
+  let heard = '', failed = '', quiet = null, still = null, finishing = false, unsaid = '', startedAt = 0;
+  const stop = () => { finishing = true; try { rec.stop(); } catch {} };
   const waitFor = ms => { clearTimeout(quiet); quiet = setTimeout(stop, ms); };
   const cap = setTimeout(stop, MAX_MS);
+  if (earlier) { said.add(earlier); heard = earlier; }
   busy = true;
   hint.hidden = true;
   typeForm.hidden = true;
   transcript.classList.remove('fade');
   transcript.textContent = '';
   setMode('listening');
+  if (earlier) showWords(earlier);
   waitFor(FIRST_WORD_MS);
 
   rec.onresult = e => {
@@ -1283,15 +1332,27 @@ function listen() {
         if (taken[i] !== norm(g)) { said.add(g); taken[i] = norm(g); } // a finished phrase is only taken once, even if re-sent
       } else pending += ' ' + r[0].transcript;
     }
-    heard = said.withPending(pending);
+    unsaid = pending.trim();
+    heard = tidySpeech(said.withPending(pending));
     showWords(heard);
     level = 1; // the orb jumps with each new word
     orbLabel.textContent = 'Tap when done';
+    clearTimeout(still);
+    still = setTimeout(() => { orbLabel.textContent = 'Still listening'; }, STILL_MS);
     waitFor(QUIET_MS);
   };
   rec.onerror = e => { failed = e.error; };
   rec.onend = () => {
+    if (!finishing && !NO_RESTART.includes(failed) && Date.now() - startedAt > QUICK_END_MS) {
+      // Words still being heard when it ended won't be sent again. Duplicates are caught if they are.
+      if (unsaid) said.add(unsaid);
+      unsaid = '';
+      failed = '';
+      taken.length = 0;
+      try { startedAt = Date.now(); rec.start(); return; } catch {}
+    }
     clearTimeout(quiet);
+    clearTimeout(still);
     clearTimeout(cap);
     activeRec = null;
     if (['not-allowed', 'service-not-allowed', 'audio-capture'].includes(failed)) return micUnavailable();
@@ -1301,10 +1362,10 @@ function listen() {
       toast(failed === 'network' ? 'Speech service unreachable. Try typing' : 'Didn’t catch that. Try again');
       return;
     }
-    capture(heard, { spoken: true });
+    capture(tidySpeech(heard, { done: true }), { spoken: true });
   };
-  activeRec = rec;
-  try { rec.start(); } catch { activeRec = null; micUnavailable(); }
+  activeRec = { stop };
+  try { startedAt = Date.now(); rec.start(); } catch { activeRec = null; micUnavailable(); }
 }
 
 // Returns true when it was merged into something already on the list

@@ -12,7 +12,7 @@ const root = path.join(here, 'blurt');
 const PORT = Number(process.env.PORT) || 5181;
 const MODEL = process.env.CLAUDE_MODEL || 'claude-haiku-5-5';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
-const MAX_TEXT = 2000;
+const MAX_TEXT = 4000;
 
 const client = new Anthropic();
 const provider = () => process.env.ANTHROPIC_API_KEY ? 'claude' : process.env.GEMINI_API_KEY ? 'gemini' : null;
@@ -22,6 +22,8 @@ const SYSTEM = `You sort a voice note into a personal organizer. People speak qu
 
 The transcript comes from the phone's speech recognition, so it can contain mishearings: words that sound alike ("by eggs" for "buy eggs", "for" or "to" for the numbers 4 and 2, "remind me too"), missing punctuation and run-on sentences. Work out what the speaker meant and use the corrected words in titles. Quotes stay exactly as transcribed.
 
+People are thinking out loud, so the words come out messy. Ignore fillers ("like", "you know", "I mean", "يعني") and starts they abandoned. When they correct themselves ("Thursday, no, Friday", "at 4, actually 5"), the later version wins, and something they cancel ("scratch that", "never mind") isn't filed. A fragment with no clear meaning isn't filed either. A pause can land in the middle of a thought, so a comma doesn't always mean a new item. Never invent details for words that are missing.
+
 Categories:
 - cal: something that happens at a time or on a day: appointments, meetings, plans, events. Always has a date.
 - rem: a nudge to do something at a moment: "remind me to…", "in 20 minutes…". The time is optional.
@@ -30,7 +32,7 @@ Categories:
 - note: ideas, thoughts and information to keep, such as workouts, quotes or facts.
 
 For each part:
-- quote: the exact words from the transcript this part came from, in order. Together the quotes cover the whole transcript.
+- quote: the exact words from the transcript this part came from, in order. Together the quotes cover the whole transcript, apart from fillers and things abandoned or cancelled.
 - text: a short, clean title in the speaker's language, first letter capitalized. Leave out the date and time words and filler like "I need to" or "remind me to".
 - datetime: local time as "YYYY-MM-DDTHH:MM", worked out from the current date and time you are given. Weekdays mean the next one coming, which is today if today is that weekday and the time hasn't passed yet. A day with no time is "YYYY-MM-DDT00:00" with all_day true. "Tonight" with no time is 20:00. Relative times ("in 20 minutes") are added to the current time. A reminder with a day but no time goes off at 09:00. Use null when there is no date or time, with all_day false.
 - Hours said without am or pm: 8 to 11 are morning, 12 is noon, 1 to 7 are afternoon or evening.
