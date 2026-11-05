@@ -24,7 +24,7 @@ On a hosted server, AI sorting only works for people with an invite. Set `INVITE
 
 ## What it does
 
-- **Talk or type.** Speech-to-text uses the browser's built-in speech recognition. It keeps listening through pauses of up to 6 seconds, for up to 2 minutes, and cleans up stutters and "um"s. If it still cuts you off, Keep talking on the review step carries on from your last words.
+- **Talk or type.** Speech-to-text uses the browser's built-in speech recognition. It waits through pauses of up to 6 seconds, for up to 2 minutes, and cleans up stutters and "um"s. Android's speech engine can stop sooner by itself. If you get cut off, Keep talking on the review step carries on from your last words.
 - **Sorts into five cards.** Claude does the sorting when a key is set. Without one, built-in rules handle phrasings like "next Friday at 10", "tomorrow morning", "in 3 days" and "pick up the kids at 5".
 - **Review before saving.** You see what was understood first. Tap the colored label to move an item to another list, drag it onto a card, edit the text or tap the time to change it.
 - **Edit anything.** Tap an item in any list to change its text, amount, list or time, or to delete it.

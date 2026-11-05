@@ -1213,7 +1213,9 @@ function micUnavailable() {
 // Keeps listening through short pauses, so a ramble isn't cut off mid-thought.
 // It stops when you tap the orb, go quiet for a while, or after two minutes.
 const FIRST_WORD_MS = 10000, QUIET_MS = 6000, STILL_MS = 3000, MAX_MS = 120000;
-// Android's engine can end by itself during a pause. Restart it, unless one of these says it can't carry on.
+// The engine can end by itself during a pause. Restart it, unless one of these says it can't carry on.
+// Not on Android: every start plays the system's mic sound, so there Keep talking on the review step takes over.
+const CAN_RESTART = !/Android/i.test(navigator.userAgent);
 const NO_RESTART = ['not-allowed', 'service-not-allowed', 'audio-capture', 'network', 'aborted', 'language-not-supported'];
 const QUICK_END_MS = 500;
 
@@ -1343,7 +1345,7 @@ function listen(earlier = '') {
   };
   rec.onerror = e => { failed = e.error; };
   rec.onend = () => {
-    if (!finishing && !NO_RESTART.includes(failed) && Date.now() - startedAt > QUICK_END_MS) {
+    if (CAN_RESTART && !finishing && !NO_RESTART.includes(failed) && Date.now() - startedAt > QUICK_END_MS) {
       // Words still being heard when it ended won't be sent again. Duplicates are caught if they are.
       if (unsaid) said.add(unsaid);
       unsaid = '';
