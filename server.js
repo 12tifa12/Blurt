@@ -77,7 +77,7 @@ const prompt = (text, now) => `Current date and time: ${now}\n\nTranscript:\n"""
 async function sortWithClaude(text, now) {
   const response = await client.messages.create({
     model: MODEL,
-    max_tokens: 4000,
+    max_tokens: 16000, // room for a very long list: each item takes about 40 tokens of JSON
     // Sorting is quick work: low effort keeps it fast
     output_config: { effort: 'low', format: { type: 'json_schema', schema: SCHEMA } },
     system: SYSTEM,

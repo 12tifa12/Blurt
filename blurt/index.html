@@ -812,7 +812,7 @@ const AISLES = [
   ['Bakery', 'bagel bread bun cake croissant muffin pita roll tortilla عيش خبز توست كرواسون كيك'],
   ['Dairy & eggs', 'butter cheese cream egg labneh milk yogurt yoghurt لبن حليب بيض جبن جبنة زبادي زبادى زبدة قشطة'],
   ['Meat & fish', 'bacon beef chicken fish ham lamb mince pork salmon sausage shrimp steak tuna turkey لحم لحمة فراخ دجاج سمك جمبري تونة سجق كفتة'],
-  ['Pantry', 'bean cereal chip chocolate coffee cracker flour honey jam ketchup lentil mayo noodle nut oat oatmeal oil pasta peanut rice salt sauce snack soup spice sugar tea vinegar'
+  ['Pantry', 'bean biscuit cereal chip chocolate coffee cookie cracker flour honey jam ketchup lentil mayo noodle nut oat oatmeal oil pasta peanut rice salt sauce snack soup spice sugar tea vinegar'
     + ' رز أرز ارز سكر ملح زيت مكرونة شاي قهوة عدس فول دقيق عسل مربى صلصة بهارات'],
   ['Frozen', 'frozen ice ايس آيس'],
   ['Drinks', 'beer cola drink juice soda water wine مية مياه عصير بيبسي'],
@@ -1082,8 +1082,8 @@ async function capture(text, { spoken = false, wordDelay = 120 } = {}) {
   state.lastDump = Date.now();
   save();
   finishIdle();
-  const m = merged.filter(Boolean).length;
-  toast(`${picked.length} saved` + (m ? ` · ${m} already on your list` : ''));
+  const m = merged.filter(Boolean).length, added = picked.length - m;
+  toast([added && `${added} saved`, m && `${m} already on your list`].filter(Boolean).join(' · '));
 }
 
 // ---------- Review: see what was understood, fix it, then save ----------
@@ -1494,19 +1494,32 @@ function listen(earlier = '') {
 }
 
 // Returns true when it was merged into something already on the list
-function addItem(it) {
+function addItem(it, { show = true } = {}) {
   const { cat, ...data } = it;
   const merged = cat === 'shop' && mergeShop(data);
   if (!merged) state.items[cat].unshift({ ...data, id: uid(), created: Date.now() });
   save();
-  updateCard(cat);
+  if (show) updateCard(cat);
   return merged;
 }
 
-// Flies a chip from `from` (a review row) or the transcript into its card
+// Flies a chip from `from` (a review row) or the transcript into its card.
+// The item is saved first: the flight is only for show, and can stall if you switch apps mid-way.
 function fly(it, i, n, from) {
-  if (reduced) return Promise.resolve(addItem(it));
+  const merged = addItem(it, { show: reduced });
+  if (reduced) return Promise.resolve(merged);
+  const delay = i * Math.min(160, 1600 / n); // a long list still lands in about two seconds
   return new Promise(resolve => {
+    let landed = false;
+    const land = () => {
+      if (landed) return;
+      landed = true;
+      updateCard(it.cat);
+      bump(it.cat);
+      if (n <= 12 || i === n - 1) buzz(8); // a long list would buzz non-stop
+      resolve(merged);
+    };
+    setTimeout(land, delay + 2000); // if the animation never finishes, carry on anyway
     setTimeout(() => {
       const el = document.createElement('div');
       el.className = `fly c-${it.cat}`;
@@ -1515,21 +1528,17 @@ function fly(it, i, n, from) {
       const tr = rel(from || transcript), card = rel(cards[it.cat]);
       if (from) from.animate([{ opacity: 1 }, { opacity: 0.25 }], { duration: 200, fill: 'forwards' });
       const x0 = from ? tr.x + 8 : tr.x + tr.w / 2 - el.offsetWidth / 2 + (i - (n - 1) / 2) * 16;
-      const y0 = tr.y + tr.h / 2 - el.offsetHeight / 2;
+      let y0 = tr.y + tr.h / 2 - el.offsetHeight / 2;
+      if (from) { const box = rel(rlist); y0 = Math.min(Math.max(y0, box.y), box.y + box.h - el.offsetHeight); } // rows scrolled out of view leave from the list's edge
       const x1 = card.x + card.w / 2 - el.offsetWidth / 2;
       const y1 = card.y + 8;
       el.animate([
         { transform: `translate(${x0}px, ${y0}px) scale(.6)`, opacity: 0 },
         { transform: `translate(${x0}px, ${y0 - 18}px) scale(1)`, opacity: 1, offset: 0.22 },
         { transform: `translate(${x1}px, ${y1}px) scale(.5)`, opacity: 0.9 },
-      ], { duration: 780, easing: 'cubic-bezier(.55,0,.35,1)', fill: 'forwards' }).onfinish = () => {
-        el.remove();
-        const merged = addItem(it);
-        bump(it.cat);
-        buzz(8);
-        resolve(merged);
-      };
-    }, i * 160);
+      ], { duration: 780, easing: 'cubic-bezier(.55,0,.35,1)', fill: 'forwards' }).onfinish = () => { el.remove(); land(); };
+      setTimeout(() => el.remove(), 2500);
+    }, delay);
   });
 }
 
