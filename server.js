@@ -13,6 +13,9 @@ const PORT = Number(process.env.PORT) || 5181;
 const MODEL = process.env.CLAUDE_MODEL || 'claude-haiku-5-5';
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
 const MAX_TEXT = 4000;
+// The app gives up and uses its built-in sorter after 12 seconds, so the AI gets a little less
+const AI_TIMEOUT_MS = 10000;
+const SLOW_MS = 5000;
 
 const client = new Anthropic();
 const provider = () => process.env.ANTHROPIC_API_KEY ? 'claude' : process.env.GEMINI_API_KEY ? 'gemini' : null;
@@ -82,7 +85,7 @@ async function sortWithClaude(text, now) {
     output_config: { effort: 'low', format: { type: 'json_schema', schema: SCHEMA } },
     system: SYSTEM,
     messages: [{ role: 'user', content: prompt(text, now) }],
-  });
+  }, { timeout: AI_TIMEOUT_MS, maxRetries: 0 });
   if (response.stop_reason === 'refusal') throw Object.assign(new Error('refused'), { status: 422 });
   const block = response.content.find(b => b.type === 'text');
   if (!block) throw new Error('No text in response');
@@ -104,7 +107,11 @@ async function callGemini(text, now, withSchema) {
       contents: [{ role: 'user', parts: [{ text: prompt(text, now) }] }],
       generationConfig,
     }),
-  }).catch(() => { throw Object.assign(new GeminiError('Could not reach Gemini'), { status: 502 }); });
+    signal: AbortSignal.timeout(AI_TIMEOUT_MS),
+  }).catch(e => {
+    if (e.name === 'TimeoutError') throw Object.assign(new GeminiError(`Gemini took over ${AI_TIMEOUT_MS / 1000} s`), { status: 504 });
+    throw Object.assign(new GeminiError('Could not reach Gemini'), { status: 502 });
+  });
   if (!res.ok) {
     const detail = await res.text();
     throw Object.assign(new GeminiError(`Gemini ${res.status}: ${detail.slice(0, 300)}`), { status: res.status });
@@ -189,7 +196,8 @@ async function handleSort(req, res) {
   try {
     const started = Date.now();
     const result = await sort(text.trim(), now);
-    console.log(`${who}: ${provider()} sorted in ${Date.now() - started} ms: ${result.segments.length} parts`);
+    const ms = Date.now() - started;
+    console.log(`${who}: ${provider()} sorted in ${ms} ms: ${result.segments.length} parts${ms > SLOW_MS ? ' (slow)' : ''}`);
     send(res, 200, result);
   } catch (e) {
     if (e instanceof Anthropic.AuthenticationError) {
@@ -197,10 +205,12 @@ async function handleSort(req, res) {
       return send(res, 503, { error: 'AI not set up' });
     }
     if (e instanceof Anthropic.RateLimitError) return send(res, 429, { error: 'Too many requests, try again shortly' });
+    if (e instanceof Anthropic.APIConnectionTimeoutError) { console.error(`${who}: Claude took over ${AI_TIMEOUT_MS / 1000} s`); return send(res, 504, { error: 'AI too slow' }); }
     if (e instanceof Anthropic.APIConnectionError) return send(res, 502, { error: 'Could not reach Claude' });
     if (e instanceof Anthropic.APIError) { console.error('Claude API error:', e.status, e.message); return send(res, 502, { error: 'AI error' }); }
     if (e instanceof GeminiError) {
-      console.error(e.message);
+      console.error(`${who}: ${e.message}`);
+      if (e.status === 504) return send(res, 504, { error: 'AI too slow' });
       if ([400, 401, 403, 404].includes(e.status)) return send(res, 503, { error: 'AI not set up' });
       if (e.status === 429) return send(res, 429, { error: 'Too many requests, try again shortly' });
       return send(res, 502, { error: 'AI error' });
@@ -225,6 +235,8 @@ async function handleStatic(req, res) {
 
 http.createServer((req, res) => {
   if (req.url === '/api/sort' && req.method === 'POST') return handleSort(req, res);
+  // The app calls this when it opens, so a sleeping server is awake by the time you've finished talking
+  if (req.url === '/api/ping') { res.writeHead(204, { 'Cache-Control': 'no-store' }); return res.end(); }
   if (req.method === 'GET') return handleStatic(req, res);
   send(res, 405, 'Method not allowed', 'text/plain');
 }).listen(PORT, () => {

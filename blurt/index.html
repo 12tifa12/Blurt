@@ -1274,22 +1274,43 @@ function fromAi(segments) {
 const INVITE_KEY = 'blurt.invite';
 const getInvite = () => { try { return localStorage.getItem(INVITE_KEY) || ''; } catch { return ''; } };
 
+// A free server sleeps when nobody uses it, and takes up to a minute to wake. Knock as soon as the app opens
+// (or comes back after a while), so it's usually awake by the time you've finished talking.
+const AI_WAIT_MS = 12000, SLOW_HINT_MS = 3000, REWAKE_MS = 5 * MIN;
+let serverAwake = false, lastWake = 0;
+function wakeServer() {
+  if (Date.now() - lastWake < REWAKE_MS) return;
+  lastWake = Date.now();
+  serverAwake = false;
+  fetch('/api/ping', { cache: 'no-store' }).then(r => { serverAwake = r.ok; }).catch(() => {});
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') wakeServer(); });
+
 let aiOk = true, toldOffline = false;
 async function sortText(text) {
   if (aiOk) {
+    // Say what's happening instead of a silent wait
+    const slow = setTimeout(() => { if (mode === 'sorting') orbLabel.textContent = serverAwake ? 'Still sorting' : 'Waking up'; }, SLOW_HINT_MS);
+    let tooSlow = false;
     try {
       const res = await fetch('/api/sort', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Blurt-Invite': getInvite() },
         body: JSON.stringify({ text, now: localNow() }),
-        signal: AbortSignal.timeout(20000),
+        signal: AbortSignal.timeout(AI_WAIT_MS),
       });
+      serverAwake = true;
       if (res.ok) return fromAi((await res.json()).segments);
       if ([401, 404, 405, 503].includes(res.status)) aiOk = false; // no AI for this page or person: stop asking
-    } catch {
-      // Offline, timed out, or no server (like the hosted preview): fall through
+      tooSlow = res.status === 504;
+    } catch (e) {
+      // Timed out, offline, or no server (like the hosted preview): fall through
+      tooSlow = e.name === 'TimeoutError';
+    } finally {
+      clearTimeout(slow);
     }
-    if (!toldOffline) { toldOffline = true; toast('AI unavailable, using basic sorting'); }
+    if (tooSlow) toast('AI was too slow, used basic sorting');
+    else if (!toldOffline) { toldOffline = true; toast('AI unavailable, using basic sorting'); }
   }
   return parse(text);
 }
@@ -2331,6 +2352,7 @@ if (params.get('code')) {
 }
 // Ask the browser not to clear Blurt's data when the phone runs low on space
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+wakeServer();
 if (params.get('act')) handleAct({ act: params.get('act'), id: params.get('id') });
 const shared = ['title', 'text', 'url'].map(k => params.get(k)).filter(Boolean).join(' ').trim();
 if (shared) setTimeout(() => capture(shared.slice(0, 2000), { wordDelay: 40 }), 400);

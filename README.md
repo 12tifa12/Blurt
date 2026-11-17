@@ -50,3 +50,4 @@ The API key stays on the server and is never sent to the browser.
 - A web app can't schedule a notification for when it's closed. For reminders that must fire no matter what, export them to your phone's calendar. Reliable background alerts need push from a server, or a native app.
 - Android home-screen widgets aren't available to web apps. The long-press shortcuts are the closest thing.
 - The mic and install only work on `localhost` or over HTTPS.
+- On a free host that sleeps (like Render's free plan), the first sort after a break can be slow. The app wakes the server as soon as it opens, opens from its saved copy if the server takes more than 3 seconds, and falls back to its built-in sorter if the AI hasn't answered in 12 seconds.

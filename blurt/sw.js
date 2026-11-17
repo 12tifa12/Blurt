@@ -13,17 +13,26 @@ self.addEventListener('activate', e => {
     .then(() => self.clients.claim()));
 });
 
-// Network first so updates show up right away; the cache is only the offline fallback
+// Network first so updates show up right away. But a sleeping server can take a minute to answer, so after
+// a few seconds the saved copy is shown instead (the fresh one is still saved for next time).
+const NETWORK_WAIT_MS = 3000;
 self.addEventListener('fetch', e => {
   const req = e.request, url = new URL(req.url);
   if (req.method !== 'GET' || url.pathname.startsWith('/api/')) return;
-  e.respondWith(fetch(req).then(res => {
+  const fresh = fetch(req).then(res => {
     if ((res.ok || res.type === 'opaque') && !/(text|code)=/.test(url.search)) {
       const copy = res.clone();
       caches.open(CACHE).then(c => c.put(req, copy));
     }
     return res;
-  }).catch(() => caches.match(req, { ignoreSearch: true }).then(r => r || caches.match('/'))));
+  });
+  e.respondWith((async () => {
+    const saved = await caches.match(req, { ignoreSearch: true });
+    if (!saved) return fresh.catch(() => caches.match('/'));
+    const late = new Promise(resolve => setTimeout(() => resolve(saved), NETWORK_WAIT_MS));
+    return Promise.race([fresh.catch(() => saved), late]);
+  })());
+  e.waitUntil(fresh.catch(() => {}));
 });
 
 // The app keeps its data in the page, so the buttons are passed to an open window, or open one
