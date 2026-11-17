@@ -28,7 +28,7 @@ Categories:
 - cal: something that happens at a time or on a day: appointments, meetings, plans, events. Always has a date.
 - rem: a nudge to do something at a moment: "remind me to…", "in 20 minutes…". The time is optional.
 - task: a to-do with no specific time.
-- shop: things to buy. Each product is its own item ("eggs and milk" is two items), and the item text is the amount if one was said, then the product ("2 liters milk", "eggs").
+- shop: things to buy. Each product is its own item ("eggs and milk" is two items), and the item text is the amount if one was said, then the product ("2 liters milk", "eggs", "500 g minced beef"). Keep the amount the way it was said ("a dozen eggs" is "1 dozen eggs", not "12 eggs"), leave out packaging when a weight is given, and don't make up an amount for "some" or "a few". "We need milk", "we're out of eggs" and "add bread to the list" are shopping.
 - note: ideas, thoughts and information to keep, such as workouts, quotes or facts.
 
 For each part:

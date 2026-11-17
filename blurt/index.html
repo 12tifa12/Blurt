@@ -417,10 +417,10 @@ function label(it, cat) {
   if (cat === 'shop' && it.n) return `${it.text} · ${qtyLabel(it)}`;
   return it.text;
 }
-const fmtN = n => n === 0.5 ? '½' : String(+n.toFixed(2));
-const qtyLabel = it => !it.n ? '' : it.unit ? `${fmtN(it.n)} ${it.unit}` : `×${fmtN(it.n)}`;
+const fmtN = n => ({ 0.5: '½', 0.25: '¼', 0.75: '¾' })[n] || String(+n.toFixed(2));
+const qtyLabel = it => !it.n ? '' : it.unit ? `${fmtN(it.n)} ${unitLabel(it.unit, it.n)}` : `×${fmtN(it.n)}`;
 // The same item as you'd say it, for editing: "2 dozen Eggs", "3 Apples"
-const shopText = it => it.n ? `${+it.n.toFixed(2)}${it.unit ? ' ' + it.unit : ''} ${it.text}` : it.text;
+const shopText = it => it.n ? `${+it.n.toFixed(2)}${it.unit ? ' ' + unitLabel(it.unit, it.n) : ''} ${it.text}` : it.text;
 const ageDays = it => it.created ? Math.floor((Date.now() - it.created) / DAY) : 0;
 const STALE = 3; // days before a to-do counts as waiting a while
 
@@ -513,7 +513,12 @@ const ORD = '(\\d{1,2})(?:st|nd|rd|th)?';
 const DATE_RE = new RegExp(`\\b(?:on\\s+)?(?:the\\s+)?(?:${MONTH}\\.?\\s+(?:the\\s+)?${ORD}|${ORD}\\s+(?:of\\s+)?${MONTH}\\.?)(?:\\s+(\\d{4}))?\\b`, 'i');
 const ORD_RE = /\bon\s+the\s+(\d{1,2})(?:st|nd|rd|th)\b/i; // "on the 6th" = this month, or next if it has passed
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
-const SHOP_RE = /^(?:i\s+)?(?:need\s+to\s+)?(?:buy|get|grab|pick\s+up|order)\s+/i;
+// Ways of saying "this is shopping": "buy milk", "هات لبن", "add milk to the list", "shopping list: milk",
+// and, only when what follows is clearly groceries, "we need milk", "we're out of eggs" or just "milk and eggs"
+const SHOP_RE = /^(?:i\s+)?(?:need\s+to\s+)?(?:buy|get|grab|pick\s+up|order)\s+|^(?:هات|هاتي|هاتوا|جيب|جيبي|جيبوا|اشتري|اشترى|اشتروا|نشتري)\s+/iu;
+const LIST_ADD_RE = /^(?:add|put)\s+(.+?)\s+(?:to|on)\s+(?:the|my|our)\s+(?:shopping\s+|grocery\s+)?list$/i;
+const LIST_HEAD_RE = /^(?:the\s+)?(?:shopping|grocery|groceries)(?:\s+list)?\s*[:,-]?\s+/i;
+const NEED_RE = /^(?:(?:i|we)\s+(?:need|want)|need|(?:i'?m|i\s+am|we'?re|we\s+are)\s+(?:out|running\s+(?:low|out))\s+(?:of|on)|out\s+of)\s+(?:some\s+|more\s+)?/i;
 const NOTE_RE = /^(?:idea|note|thought|remember\s+that)\s*[:,-]?\s+/i;
 const REM_RE = /^(?:please\s+)?remind\s+me\s+(?:to\s+|about\s+|that\s+)?/i;
 const IN_RE = /\bin\s+(\d+|an?|half\s+an)\s*(minutes?|mins?|hours?|hrs?)\b/i;
@@ -615,6 +620,42 @@ function findRem(c) {
   return { text: cap(rest || 'Reminder'), at };
 }
 
+// "milk and eggs", "لبن وبيض": split a shopping list into its items. Arabic "و" is joined to the next word,
+// so it only splits there when the rest is a grocery word or an amount ("وبيض"), not in words like "ورق".
+function splitList(s) {
+  return s.split(/\s+and\s+|\s*&\s*|\s+و\s+/iu).flatMap(part => {
+    const out = [];
+    for (const t of part.trim().split(/\s+/).filter(Boolean)) {
+      const rest = t.slice(1), prev = out.length ? out.at(-1).split(' ').at(-1) : '';
+      const half = UNIT_OF.has(prev) && NUMBERS[rest] < 1; // "كيلو ونص" is one and a half kilos, not two items
+      const starts = out.length && t[0] === 'و' && rest.length > 1 && !half && (aisleOf(rest) !== 'Other' || UNIT_OF.has(rest) || NUMBERS[rest] != null);
+      if (!out.length || starts) out.push(starts ? rest : t); else out[out.length - 1] += ' ' + t;
+    }
+    return out;
+  });
+}
+// Every item is a known grocery or has an amount: "eggs and bread", "2 kg rice", "لبن وبيض"
+const isGroceries = s => {
+  const items = splitList(s).map(shopItem);
+  return items.length > 0 && items.every(it => it.n || (it.text && it.text.split(/\s+/).every(w => aisleOf(w) !== 'Other' && !VERB_START.test(w))));
+};
+// The groceries in a sentence, or null when it isn't about shopping
+function shopBody(c, errand = false) {
+  const added = c.match(LIST_ADD_RE);
+  if (added) return added[1];
+  if (LIST_HEAD_RE.test(c)) return c.replace(LIST_HEAD_RE, '');
+  if (SHOP_RE.test(c) && !errand) return c.replace(SHOP_RE, '');
+  if (NEED_RE.test(c) && isGroceries(c.replace(NEED_RE, ''))) return c.replace(NEED_RE, '');
+  if (!VERB_START.test(c) && !findWhen(c) && isGroceries(c)) return c;
+  return null;
+}
+
+// For an item moved to Shopping by hand: "I need to buy milk" → "milk", "add eggs to the list" → "eggs"
+function stripShopWords(s) {
+  const t = s.trim().replace(FILLER_RE, ''), added = t.match(LIST_ADD_RE);
+  return added ? added[1] : t.replace(LIST_HEAD_RE, '').replace(SHOP_RE, '').replace(NEED_RE, '');
+}
+
 // Returns segments: { raw, cat, items[] } — raw keeps the spoken words for the transcript.
 function parse(text) {
   const clauses = text.replace(/\s+/g, ' ')
@@ -631,15 +672,13 @@ function parse(text) {
     // "Pick up the kids at 5" or "pick up the parcel from the post office" is an errand, not shopping
     const errand = /^(?:i\s+)?(?:need\s+to\s+)?pick\s+up\b/i.test(c) && (PERSON_RE.test(c) || /\bfrom\b/i.test(c));
     // "buy eggs, 500g beef, bread": the list carries on after a comma until something else starts
-    const more = prev?.cat === 'shop' && !VERB_START.test(c) && !findWhen(c) && (QTY_RE.test(c) || c.split(/\s+/).length <= 3);
+    const more = prev?.cat === 'shop' && !VERB_START.test(c) && !findWhen(c) && (readAmount(c) || c.split(/\s+/).length <= 3);
     prev = null;
-    if (more) return prev = { raw, cat: 'shop', items: c.split(/\s+and\s+|\s*&\s*/).map(s => s.trim()).filter(Boolean).map(shopItem) };
-    if (SHOP_RE.test(c) && !errand) {
-      let body = c.replace(SHOP_RE, '');
+    let body = more ? c : shopBody(c, errand);
+    if (body != null) {
       const w = findWhen(body); // "buy milk tomorrow": the list doesn't need the day
       if (w) body = w.text;
-      const list = body.split(/\s+and\s+|\s*&\s*/).map(s => s.trim()).filter(Boolean).map(shopItem);
-      return prev = { raw, cat: 'shop', items: list.filter(i => i.text) };
+      return prev = { raw, cat: 'shop', items: splitList(body).map(shopItem).filter(i => i.text) };
     }
     const when = findWhen(c);
     if (when) return { raw, cat: 'cal', items: [when] };
@@ -649,40 +688,118 @@ function parse(text) {
 
 // ---------- Shopping smarts: quantities, merging, store aisles ----------
 const PERSON_RE = /\b(?:kids?|children|son|daughter|mom|mum|dad|parents?|wife|husband|partner|boyfriend|girlfriend|friends?|baby|grandma|grandpa|brother|sister|him|her|them)\b/i;
-const UNIT = '(dozen|kilos?|kgs?|grams?|g|pounds?|lbs?|liters?|litres?|l|ml|bags?|box(?:es)?|bottles?|cans?|packs?|packets?|cartons?|loaf|loaves|bunch(?:es)?|jars?|tins?|bars?|rolls?|pieces?)';
-const QTY_RE = new RegExp(`^(?:(\\d+(?:\\.\\d+)?)|(a\\s+couple\\s+of|a\\s+few|half\\s+an?|an?|one|two|three|four|five|six|seven|eight|nine|ten|twelve)\\b)\\s*(?:${UNIT}\\b\\s*)?(?:of\\s+)?`, 'i');
+// Units by what they mean, so "kilos", "kg" and "كيلو" are the same thing. English ones are stored by key
+// ("kg", "bottle"); Arabic ones are kept as said so the list reads naturally.
+const UNITS = {
+  kg: 'kg kgs kilo kilos kilogram kilograms كيلو', g: 'g gr gram grams gramme grammes جرام جرامات جم',
+  l: 'l liter liters litre litres لتر لترات', ml: 'ml milliliter milliliters millilitre millilitres',
+  lb: 'lb lbs pound pounds', oz: 'oz ounce ounces', gallon: 'gallon gallons', dozen: 'dozen dozens دستة دستات',
+  bag: 'bag bags كيس أكياس اكياس', box: 'box boxes علبة علب', bottle: 'bottle bottles زجاجة زجاجات ازازة إزازة',
+  can: 'can cans', tin: 'tin tins', pack: 'pack packs packet packets باكو باكت', carton: 'carton cartons',
+  loaf: 'loaf loaves', bunch: 'bunch bunches', jar: 'jar jars', bar: 'bar bars', roll: 'roll rolls',
+  piece: 'piece pieces حتة', head: 'head heads', tray: 'tray trays',
+};
+const UNIT_OF = new Map(Object.entries(UNITS).flatMap(([k, words]) => words.split(' ').map(w => [w, k])));
+const SHORT_UNIT = { kg: 'kg', g: 'g', l: 'L', ml: 'ml', lb: 'lb', oz: 'oz', dozen: 'dozen' };
+const PLURAL_UNIT = { box: 'boxes', bunch: 'bunches', loaf: 'loaves' };
+// Weights and volumes add up across units: 500 g + 1 kg is 1.5 kg
+const BASE_UNIT = { g: ['g', 1], kg: ['g', 1000], ml: ['ml', 1], l: ['ml', 1000] };
+const ARABIC = /\p{Script=Arabic}/u;
+const unitKey = u => UNIT_OF.get((u || '').toLowerCase()) ?? singular((u || '').toLowerCase());
+function unitLabel(u, n) {
+  if (!u || ARABIC.test(u)) return u || '';
+  const k = UNIT_OF.get(u.toLowerCase());
+  if (!k) return u;
+  return SHORT_UNIT[k] || (n > 1 ? PLURAL_UNIT[k] || k + 's' : k);
+}
 
-// "2 dozen eggs" → { text: 'Eggs', n: 2, unit: 'dozen' }. "a banana" → { text: 'Banana' }
+const NUMBERS = {
+  a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
+  'واحد': 1, 'اتنين': 2, 'اثنين': 2, 'إثنين': 2, 'تلاتة': 3, 'ثلاثة': 3, 'تلات': 3, 'اربعة': 4, 'أربعة': 4, 'اربع': 4,
+  'خمسة': 5, 'ستة': 6, 'سبعة': 7, 'تمانية': 8, 'ثمانية': 8, 'تسعة': 9, 'عشرة': 10, 'نص': 0.5, 'نصف': 0.5, 'ربع': 0.25,
+};
+const FRACTIONS = { '½': 0.5, '¼': 0.25, '¾': 0.75 };
+// Arabic and Persian digits as plain digits: "٢" → "2"
+const westernDigits = s => s.replace(/[٠-٩]/g, d => d.charCodeAt(0) - 0x660).replace(/[۰-۹]/g, d => d.charCodeAt(0) - 0x6F0);
+const isOf = w => /^(?:of|من)$/i.test(w || '');
+
+// Reads an amount at the start: "2 dozen", "500g", "1/2 kg", "half a kilo of", "a few", "نص كيلو", "كيلو ونص".
+// Returns { n, unit, rest } (n is null for "a few"), or null when there's no amount.
+function readAmount(str) {
+  const w = westernDigits(str).trim().split(/\s+/).filter(Boolean), low = i => (w[i] || '').toLowerCase();
+  if (/^an?$/.test(low(0)) && /^\d/.test(low(1))) w.shift(); // "a 500 g pack": the number is the amount
+  let i = 0, n = null, unit = '', found = false;
+  const article = /^an?$/.test(low(0));
+  const num = low(0).match(/^(\d+(?:[.,]\d{1,2})?)(?:\/(\d+))?([\p{L}]*)$/u);
+  if (num && !(num[3] && !UNIT_OF.has(num[3]))) {
+    n = +num[1].replace(',', '.') / (num[2] ? +num[2] : 1);
+    if (num[3]) unit = num[3];
+    i = 1; found = true;
+  } else if (FRACTIONS[low(0)]) { n = FRACTIONS[low(0)]; i = 1; found = true; }
+  else if (low(0) === 'half' && /^an?$/.test(low(1))) { n = 0.5; i = 2; found = true; }
+  else if (low(0) === 'a' && low(1) === 'quarter') { n = 0.25; i = 2 + isOf(low(2)); found = true; }
+  else if ((low(0) === 'a' && low(1) === 'couple') || low(0) === 'couple') { n = 2; i = (low(0) === 'a' ? 2 : 1) + isOf(low(low(0) === 'a' ? 2 : 1)); found = true; }
+  else if (low(0) === 'a' && low(1) === 'few') { i = 2; found = true; }
+  else if (NUMBERS[low(0)] != null) { n = NUMBERS[low(0)]; i = 1; found = true; }
+  if (!unit && UNIT_OF.has(low(i))) {
+    // A unit with no number: "كيلو طماطم", "a bag of rice", "a dozen eggs". Other English ones need "of",
+    // so "a can opener" stays whole.
+    const needsOf = (!found || article) && !ARABIC.test(w[i]) && UNIT_OF.get(low(i)) !== 'dozen';
+    if (!(needsOf && !isOf(low(i + 1)))) {
+      unit = w[i]; i++;
+      if (!found) { n = 1; found = true; }
+      if (low(i) === 'ونص') { n += 0.5; i++; } else if (low(i) === 'وربع') { n += 0.25; i++; }
+    } else if (!found) return null;
+  }
+  if (!found) return null;
+  if (isOf(low(i))) i++;
+  // "500 g pack of beef": the weight is the amount, the pack is just packaging
+  if (BASE_UNIT[unitKey(unit)] && UNIT_OF.has(low(i)) && isOf(low(i + 1))) i += 2;
+  unit = unit && !ARABIC.test(unit) ? unitKey(unit) : unit;
+  return { n, unit, rest: w.slice(i).join(' ') };
+}
+
+// "2 dozen eggs" → { text: 'Eggs', n: 2, unit: 'dozen' }. "a banana" → { text: 'Banana' }. Also "cheese 1kg", "eggs x2".
 function shopItem(s) {
-  s = s.replace(/^(?:some|the|more)\s+/i, '').trim();
-  const q = s.match(QTY_RE), name = q ? s.slice(q[0].length).replace(/^(?:some|the)\s+/i, '').trim() : '';
-  if (!q || !name) return { text: cap(s) };
-  const n = q[1] ? +q[1] : toNum(q[2]), unit = (q[3] || '').toLowerCase();
-  return unit || n > 1 ? { text: cap(name), n, unit } : { text: cap(name) };
+  s = westernDigits(s).replace(/^(?:some|the|more)\s+/i, '').trim();
+  let a = readAmount(s), name = a ? a.rest : '';
+  if (!a || !name) {
+    const tail = s.match(/^(.+?)\s+(?:[x×]\s*(\d+(?:\.\d+)?)|(\d+(?:[.,]\d{1,2})?\s*[\p{L}]+))$/u);
+    const t = tail && (tail[2] ? { n: +tail[2], unit: '' } : readAmount(tail[3]));
+    if (t && !t.rest && t.n && (tail[2] || t.unit)) { a = t; name = tail[1]; }
+    else return { text: cap(s) };
+  }
+  name = name.replace(/^(?:some|the)\s+/i, '').trim();
+  return a.n && (a.unit || a.n > 1) ? { text: cap(name), n: a.n, unit: a.unit } : { text: cap(name) };
 }
-// What you type in the "How much" box: "2 dozen", "500 g", "×3"
+// What you type in the "How much" box: "2 dozen", "500 g", "×3", "1/2 kg"
 function parseQty(str) {
-  const m = str.trim().replace(/^[×x]\s*/i, '').match(/^(\d+(?:\.\d+)?|½|[a-z]+)\s*(.*)$/i);
-  if (!m) return {};
-  const n = m[1] === '½' ? 0.5 : toNum(m[1]);
-  return Number.isFinite(n) && n > 0 ? { n, unit: m[2].toLowerCase() } : {};
+  const a = readAmount(str.trim().replace(/^[×x]\s*/i, ''));
+  return a && !a.rest && a.n > 0 ? { n: a.n, unit: a.unit } : {};
 }
 
-// Names that match once plurals are ignored: "apples" = "apple", "tomatoes" = "tomato", "berries" = "berry"
-const singular = w => w.replace(/ies$/, 'y').replace(/(?:(?<=o|sh|ch|x)es|(?<!s)s)$/, '');
-const itemKey = s => s.toLowerCase().replace(/[^a-z0-9 ]/g, '').split(/\s+/).filter(Boolean).map(singular).join(' ');
-const unitKey = u => singular((u || '').toLowerCase());
+// Names that match once plurals and small differences are ignored: "apples" = "apple", "berries" = "berry",
+// "cookies" = "cookie", "jalapeño" = "jalapeno", "اللبن" = "لبن"
+const singular = w => w.replace(/ies$/, 'ie').replace(/y$/, 'ie').replace(/(?:(?<=o|sh|ch|x|ss|z)es|(?<!s)s)$/, '');
+const itemKey = s => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^\p{L}\p{N} ]/gu, '')
+  .split(/\s+/).filter(Boolean).map(w => singular(w.replace(/^ال(?=\p{L}{2})/u, ''))).join(' ');
 
-// Saying "milk" when milk is already on the list updates it instead of adding a second one
+// Saying "milk" when milk is already on the list updates it instead of adding a second one.
+// Amounts that can't be added up ("2 L" and "1 bottle") stay as separate lines rather than one replacing the other.
 function mergeShop(it) {
   const list = state.items.shop, k = itemKey(it.text);
-  const old = list.find(o => itemKey(o.text) === k);
+  const sameKind = o => !o.n || !it.n || unitKey(o.unit) === unitKey(it.unit)
+    || (BASE_UNIT[unitKey(o.unit)] && BASE_UNIT[unitKey(o.unit)][0] === BASE_UNIT[unitKey(it.unit)]?.[0]);
+  const old = list.find(o => itemKey(o.text) === k && sameKind(o));
   if (!old) return false;
   if (it.n) {
-    if (old.n && unitKey(old.unit) === unitKey(it.unit)) old.n += it.n;
-    else old.n = it.n;
-    old.unit = it.unit || old.unit;
+    if (!old.n) { old.n = it.n; old.unit = it.unit; }
+    else {
+      const from = BASE_UNIT[unitKey(it.unit)], to = BASE_UNIT[unitKey(old.unit)];
+      old.n = Math.round((old.n + (from && to ? it.n * from[1] / to[1] : it.n)) * 1000) / 1000;
+    }
   }
+  if (it.text.length > old.text.length) old.text = it.text; // keep the fuller name: "Apples" over "Apple"
   list.splice(list.indexOf(old), 1);
   list.unshift(old);
   return true;
@@ -690,24 +807,30 @@ function mergeShop(it) {
 
 // Store aisles, in the order you'd walk them. Words match by their start, so "berr" covers berries.
 const AISLES = [
-  ['Produce', 'apple avocado banana berr blueberr broccoli cabbage carrot celery cilantro corn cucumber eggplant fruit garlic ginger grape herb kale lemon lettuce lime mango melon mint mushroom onion orange parsley peach pear pepper potato salad spinach strawberr tomato veg watermelon zucchini'],
-  ['Bakery', 'bagel bread bun cake croissant muffin pita roll tortilla'],
-  ['Dairy & eggs', 'butter cheese cream egg labneh milk yogurt yoghurt'],
-  ['Meat & fish', 'bacon beef chicken fish ham lamb mince pork salmon sausage shrimp steak tuna turkey'],
-  ['Pantry', 'bean cereal chip chocolate coffee cracker flour honey jam ketchup lentil mayo noodle nut oat oil pasta peanut rice salt sauce snack soup spice sugar tea vinegar'],
-  ['Frozen', 'frozen ice'],
-  ['Drinks', 'beer cola drink juice soda water wine'],
-  ['Household', 'bag batter bulb clean detergent foil napkin paper soap sponge tissue towel trash'],
-  ['Personal care', 'deodorant lotion medicine pill razor shampoo toothbrush toothpaste vitamin'],
+  ['Produce', 'apple avocado banana berr blueberr broccoli cabbage carrot celery cilantro coconut corn cucumber eggplant fruit garlic ginger grape grapefruit herb kale lemon lettuce lime mango melon mint mushroom onion orange parsley peach pear pepper pineapple potato salad spinach strawberr tomato veg vegetable veggie watermelon zucchini'
+    + ' طماطم خيار بطاطس بطاطا بصل ثوم ليمون موز تفاح برتقال فراولة عنب مانجا مانجو خس جزر فلفل كوسة باذنجان بقدونس كزبرة نعناع سبانخ فاكهة خضار'],
+  ['Bakery', 'bagel bread bun cake croissant muffin pita roll tortilla عيش خبز توست كرواسون كيك'],
+  ['Dairy & eggs', 'butter cheese cream egg labneh milk yogurt yoghurt لبن حليب بيض جبن جبنة زبادي زبادى زبدة قشطة'],
+  ['Meat & fish', 'bacon beef chicken fish ham lamb mince pork salmon sausage shrimp steak tuna turkey لحم لحمة فراخ دجاج سمك جمبري تونة سجق كفتة'],
+  ['Pantry', 'bean cereal chip chocolate coffee cracker flour honey jam ketchup lentil mayo noodle nut oat oatmeal oil pasta peanut rice salt sauce snack soup spice sugar tea vinegar'
+    + ' رز أرز ارز سكر ملح زيت مكرونة شاي قهوة عدس فول دقيق عسل مربى صلصة بهارات'],
+  ['Frozen', 'frozen ice ايس آيس'],
+  ['Drinks', 'beer cola drink juice soda water wine مية مياه عصير بيبسي'],
+  ['Household', 'bag battery batteries bulb clean cleaner detergent foil napkin paper soap sponge tissue towel trash صابون مناديل ورق منظف كلور'],
+  ['Personal care', 'deodorant lotion medicine pill razor shampoo toothbrush toothpaste vitamin شامبو معجون'],
 ].map(([name, words]) => [name, words.split(' ')]);
 const PHRASES = { 'peanut butter': 'Pantry', 'ice cream': 'Frozen', 'coconut milk': 'Pantry', 'paper towel': 'Household', 'toilet paper': 'Household', 'soy sauce': 'Pantry' };
 const AISLE_ORDER = [...AISLES.map(a => a[0]), 'Other'];
+// A word matches a key that it starts with, give or take an ending: "berr" covers "berries", but "corn" isn't "cornflour"
+const keyFits = (w, k) => w.startsWith(k) && w.length - k.length <= 3;
 function aisleOf(text) {
-  const s = text.toLowerCase();
+  const s = text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
   for (const p in PHRASES) if (s.includes(p)) return PHRASES[p];
-  // The last word is usually the thing itself: "oat milk" is milk
-  for (const w of s.split(/[^a-z]+/).filter(Boolean).reverse())
-    for (const [name, keys] of AISLES) if (keys.some(k => w.startsWith(k))) return name;
+  // The last word is usually the thing itself: "oat milk" is milk. Arabic "ال" (the) and "و" (and) come off first.
+  for (const raw of s.split(/[^\p{L}]+/u).filter(Boolean).reverse()) {
+    const w = raw.replace(/^و?ال(?=\p{L}{2})/u, '');
+    for (const [name, keys] of AISLES) if (keys.some(k => keyFits(w, k))) return name;
+  }
   return 'Other';
 }
 
@@ -1105,7 +1228,7 @@ function finalize(li) {
   const it = li._it, v = li.querySelector('.rtext').value.trim();
   if (!v) return null;
   const out = { cat: it.cat, text: cap(v) };
-  if (it.cat === 'shop') Object.assign(out, shopItem(v));
+  if (it.cat === 'shop') Object.assign(out, shopItem(stripShopWords(v)));
   if (it.cat === 'cal') { out.at = it.at; out.allDay = !!it.allDay; }
   if (it.cat === 'rem') out.at = it.at ?? null;
   return out;
@@ -1993,7 +2116,11 @@ function draft() {
     out.at = out.allDay ? startOfDay(at ?? Date.now()) : at;
   }
   if (edCat === 'rem') out.at = at;
-  if (edCat === 'shop') Object.assign(out, parseQty(edQty.value));
+  if (edCat === 'shop') {
+    // Moved here from another list: "Buy 2 liters of milk" becomes "Milk" with its amount, unless one is typed in
+    if (edFrom !== 'shop' && !edQty.value.trim()) Object.assign(out, shopItem(stripShopWords(out.text)));
+    else Object.assign(out, parseQty(edQty.value));
+  } else if (edFrom === 'shop') out.text = cap(shopText({ text: out.text, ...parseQty(edQty.value) })); // keep the amount in words
   if (out.at === edItem.at && edItem.fired) out.fired = true; // same time: don't ping again
   return out;
 }
